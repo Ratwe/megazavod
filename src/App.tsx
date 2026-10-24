@@ -33,6 +33,9 @@ type SavedState = {
   incidentResolvedAt: number | null
   incidentResolved: boolean
   incidentChoice: string | null
+  incidentProgressBonus: number
+  incidentXpBonus: number
+  incidentKnowledge: string | null
 }
 
 const jobs: Job[] = [
@@ -54,6 +57,7 @@ const departments = {
 const defaultSaved: SavedState = {
   name: '', screen: 'onboarding', department: 'mechanics', jobId: null,
   jobStartedAt: null, incidentAvailableAt: null, incidentCreatedAt: null, incidentResolvedAt: null, incidentResolved: false, incidentChoice: null,
+  incidentProgressBonus: 0, incidentXpBonus: 0, incidentKnowledge: null,
 }
 
 const STORAGE_KEY = 'zavod-state-v2'
@@ -64,6 +68,43 @@ const news = [
   { time: '09:17', category: 'Энергетика', title: 'Потребление на лифтовой линии выше нормы', body: 'Силовой щит зарегистрировал нестабильную нагрузку. Нужна диагностика контура.', critical: false },
   { time: '08:41', category: 'Инженерия', title: 'Обследование шахты завершено', body: 'Привод остановлен из-за износа опорного подшипника. Открыт заказ производству.', critical: false },
 ]
+
+const incidentOptions = [
+  {
+    title: 'Проверить крепления',
+    text: 'Остановить станок и устранить возможное ослабление.',
+    result: '+2 к прогрессу наряда · +1 XP',
+    progressBonus: 2,
+    xpBonus: 1,
+    knowledge: null,
+    icon: Wrench,
+    tag: 'БОЛЬШЕ ПРОГРЕССА',
+  },
+  {
+    title: 'Снизить обороты',
+    text: 'Продолжить работу в щадящем режиме без полной диагностики.',
+    result: '+1 к прогрессу наряда · +2 XP',
+    progressBonus: 1,
+    xpBonus: 2,
+    knowledge: null,
+    icon: Gauge,
+    tag: 'СБАЛАНСИРОВАННО',
+  },
+  {
+    title: 'Разобраться самому',
+    text: 'Самостоятельно исследовать причину вибрации вместо выпуска детали.',
+    result: '+4 XP · знание «Диагностика привода»',
+    progressBonus: 0,
+    xpBonus: 4,
+    knowledge: 'Диагностика привода',
+    icon: Target,
+    tag: 'БОЛЬШЕ ОПЫТА',
+  },
+]
+
+function getIncidentOption(choice: string | null) {
+  return incidentOptions.find(option => option.title === choice) ?? null
+}
 
 const workActions: Record<Department, { active: string, completed: string }[]> = {
   mechanics: [
@@ -92,7 +133,12 @@ function getWorkAction(job: Job, cycle: number) {
 function loadState(): SavedState {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
-    return raw ? { ...defaultSaved, ...JSON.parse(raw) } : defaultSaved
+    if (!raw) return defaultSaved
+    const saved = { ...defaultSaved, ...JSON.parse(raw) } as SavedState
+    if (saved.incidentChoice === 'Позвать инженера') {
+      return { ...saved, incidentChoice: 'Разобраться самому', incidentXpBonus: 4, incidentProgressBonus: 0, incidentKnowledge: 'Диагностика привода' }
+    }
+    return saved
   } catch { return defaultSaved }
 }
 
@@ -161,13 +207,14 @@ function App() {
 
   useEffect(() => {
     if (!state.incidentResolved && state.incidentCreatedAt && now - state.incidentCreatedAt >= 600_000) {
-      setState(prev => ({ ...prev, incidentResolved: true, incidentResolvedAt: Date.now(), incidentChoice: 'Проверить крепления' }))
+      const fallback = incidentOptions[0]
+      setState(prev => ({ ...prev, incidentResolved: true, incidentResolvedAt: Date.now(), incidentChoice: fallback.title, incidentProgressBonus: fallback.progressBonus, incidentXpBonus: fallback.xpBonus, incidentKnowledge: fallback.knowledge }))
     }
   }, [now, state.incidentCreatedAt, state.incidentResolved])
 
   const job = jobs.find(item => item.id === state.jobId) ?? null
   const elapsed = state.jobStartedAt ? Math.max(0, Math.floor((now - state.jobStartedAt) / 1000)) : 0
-  const jobProgress = job ? Math.min(job.target, Math.floor(elapsed / 60)) : 0
+  const jobProgress = job ? Math.min(job.target, Math.floor(elapsed / 60) + state.incidentProgressBonus) : 0
   const operationProgress = job ? Math.min(25, Math.round(jobProgress / job.target * 25)) : 0
 
   const navigate = (screen: Screen) => {
@@ -193,7 +240,7 @@ function App() {
   const beginJob = (selected: Job) => {
     haptic('success')
     const startedAt = Date.now()
-    setState(prev => ({ ...prev, department: selected.department, jobId: selected.id, jobStartedAt: startedAt, incidentAvailableAt: startedAt + FIRST_INCIDENT_DELAY_MS, incidentCreatedAt: null, incidentResolvedAt: null, incidentResolved: false, incidentChoice: null, screen: 'journal' }))
+    setState(prev => ({ ...prev, department: selected.department, jobId: selected.id, jobStartedAt: startedAt, incidentAvailableAt: startedAt + FIRST_INCIDENT_DELAY_MS, incidentCreatedAt: null, incidentResolvedAt: null, incidentResolved: false, incidentChoice: null, incidentProgressBonus: 0, incidentXpBonus: 0, incidentKnowledge: null, screen: 'journal' }))
   }
 
   if (state.screen === 'onboarding') return <Onboarding name={nameDraft} setName={setNameDraft} submit={createCharacter} />
@@ -490,6 +537,7 @@ function Journal({ state, job, progress, elapsed, navigate }: { state: SavedStat
   if (state.incidentCreatedAt) entries.push({ kind: 'incident', timestamp: state.incidentCreatedAt, order: 2 })
   if (state.incidentResolved && state.incidentCreatedAt) entries.push({ kind: 'resolution', timestamp: state.incidentResolvedAt ?? state.incidentCreatedAt, order: 3 })
   entries.sort((a, b) => a.timestamp - b.timestamp || a.order - b.order)
+  const incidentOutcome = getIncidentOption(state.incidentChoice)
 
   return (
     <div className="content-screen journal-screen">
@@ -506,10 +554,10 @@ function Journal({ state, job, progress, elapsed, navigate }: { state: SavedStat
             }
             if (entry.kind === 'incident' && !state.incidentResolved) return <button className="timeline-event incident-entry" key={`incident-${entry.timestamp}`} onClick={() => navigate('incident')}><time>{time(entry.timestamp)}</time><span className="timeline-dot danger" /><div><span className="entry-type">АКТИВНОЕ ПРОИСШЕСТВИЕ</span><h3>Станок вибрирует</h3><p>Непонятный стук привода. Решение нужно принять в течение десяти минут.</p><b>ПРИНЯТЬ РЕШЕНИЕ <ChevronRight size={15} /></b></div></button>
             if (entry.kind === 'incident') return <div className="timeline-event incident-entry" key={`incident-${entry.timestamp}`}><time>{time(entry.timestamp)}</time><span className="timeline-dot danger" /><div><span className="entry-type">ПРОИСШЕСТВИЕ</span><h3>Станок вибрирует</h3><p>Привод издал неровный металлический стук. Потребовалось решение.</p></div></div>
-            return <div className="timeline-event resolved-entry" key={`resolution-${entry.timestamp}`}><time>{time(entry.timestamp)}</time><span className="timeline-dot success" /><div><span className="entry-type">РЕШЕНИЕ ЗАФИКСИРОВАНО</span><h3>{state.incidentChoice}</h3><p>Исход сохранён в журнале. Повторное изменение невозможно.</p></div></div>
+            return <div className="timeline-event resolved-entry" key={`resolution-${entry.timestamp}`}><time>{time(entry.timestamp)}</time><span className="timeline-dot success" /><div><span className="entry-type">РЕШЕНИЕ ЗАФИКСИРОВАНО</span><h3>{state.incidentChoice}</h3><p>{incidentOutcome?.text ?? 'Исход сохранён в журнале.'}</p>{incidentOutcome && <small>{incidentOutcome.result}</small>}</div></div>
           })}
         </div>
-        <aside className="shift-summary"><span className="rail-label">СВОДКА СМЕНЫ</span><div className="summary-number"><b>{progress}</b><span>ЕДИНИЦ<br />ПРОИЗВЕДЕНО</span></div><div className="summary-stats"><p><span>Опыт</span><b>+{Math.floor(elapsed / 60)} XP</b></p><p><span>Время</span><b>{formatDuration(elapsed)}</b></p><p><span>Происшествия</span><b>{state.incidentCreatedAt ? 1 : 0}</b></p></div><button onClick={() => navigate('floor')}>ВЕРНУТЬСЯ НА ЭТАЖ</button></aside>
+        <aside className="shift-summary"><span className="rail-label">СВОДКА СМЕНЫ</span><div className="summary-number"><b>{progress}</b><span>ЕДИНИЦ<br />ПРОИЗВЕДЕНО</span></div><div className="summary-stats"><p><span>Опыт</span><b>+{Math.floor(elapsed / 60) + state.incidentXpBonus} XP</b></p><p><span>Время</span><b>{formatDuration(elapsed)}</b></p><p><span>Происшествия</span><b>{state.incidentCreatedAt ? 1 : 0}</b></p></div><button onClick={() => navigate('floor')}>ВЕРНУТЬСЯ НА ЭТАЖ</button></aside>
       </div>
     </div>
   )
@@ -517,23 +565,21 @@ function Journal({ state, job, progress, elapsed, navigate }: { state: SavedStat
 
 function Incident({ state, setState, navigate, remaining }: { state: SavedState, setState: React.Dispatch<React.SetStateAction<SavedState>>, navigate: (s: Screen) => void, remaining: number }) {
   const [choice, setChoice] = useState<string | null>(null)
-  const options = [
-    { title: 'Проверить крепления', text: 'Безопасный вариант по умолчанию. Производительность −5% на 10 минут.', icon: Wrench, safe: true },
-    { title: 'Снизить обороты', text: 'Продолжить выпуск осторожно. +7 XP, производительность +7%.', icon: Gauge },
-    { title: 'Позвать инженера', text: 'Создать межотсечный запрос и остановить станок на диагностику.', icon: Users },
-  ]
+  const selectedOption = getIncidentOption(choice)
   const confirm = () => {
-    if (!choice) return
-    setState(prev => ({ ...prev, incidentResolved: true, incidentResolvedAt: Date.now(), incidentChoice: choice, screen: 'journal' }))
+    if (!selectedOption) return
+    setState(prev => ({ ...prev, incidentResolved: true, incidentResolvedAt: Date.now(), incidentChoice: selectedOption.title, incidentProgressBonus: selectedOption.progressBonus, incidentXpBonus: selectedOption.xpBonus, incidentKnowledge: selectedOption.knowledge, screen: 'journal' }))
   }
-  if (state.incidentResolved) return <div className="content-screen resolved-screen"><Check size={44} /><span className="eyebrow"><span /> ИСХОД ЗАФИКСИРОВАН</span><h1>{state.incidentChoice}</h1><p>Решение уже применено и останется в истории Эпизода.</p><button className="primary-button" onClick={() => navigate('journal')}>ВЕРНУТЬСЯ В ДНЕВНИК</button></div>
+  const resolvedOption = getIncidentOption(state.incidentChoice)
+  if (state.incidentResolved) return <div className="content-screen resolved-screen"><Check size={44} /><span className="eyebrow"><span /> ИСХОД ЗАФИКСИРОВАН</span><h1>{state.incidentChoice}</h1><p>{resolvedOption?.text ?? 'Решение уже применено и останется в истории Эпизода.'}</p>{resolvedOption && <div className="resolved-reward">{resolvedOption.result}</div>}<button className="primary-button" onClick={() => navigate('journal')}>ВЕРНУТЬСЯ В ДНЕВНИК</button></div>
   return (
     <div className="content-screen incident-screen">
       <button className="back-button" onClick={() => navigate('journal')}><ArrowLeft size={17} /> В ДНЕВНИК</button>
       <div className="incident-header"><div className="warning-sign"><AlertTriangle /></div><div><span>ПРОИСШЕСТВИЕ · ПРОИЗВОДСТВЕННЫЙ ОТСЕК</span><h1>Станок вибрирует</h1><p>Привод издаёт неровный металлический стук.</p></div><div className="countdown"><Clock3 size={19} /><span>ОСТАЛОСЬ</span><b>{formatDuration(remaining)}</b></div></div>
       <div className="incident-visual"><div className="machine-silhouette"><Cog /><span className="vibration v1" /><span className="vibration v2" /></div><div className="scan-lines" /><span>СТАНОК 03-А · АНОМАЛИЯ ПРИВОДА</span></div>
-      <div className="decision-copy"><span>ВАШЕ РЕШЕНИЕ</span><p>Выберите одно действие. После подтверждения изменить его будет нельзя.</p></div>
-      <div className="decision-options">{options.map(({ title, text, icon: Icon, safe }) => <button key={title} className={choice === title ? 'selected' : ''} onClick={() => setChoice(title)}><span className="decision-icon"><Icon /></span><span><b>{title}</b><small>{text}</small>{safe && <em>БЕЗОПАСНЫЙ ВАРИАНТ</em>}</span><span className="radio-mark">{choice === title && <i />}</span></button>)}</div>
+      <div className="decision-copy"><span>ВАШЕ РЕШЕНИЕ</span><p>Выберите, что важнее сейчас: прогресс наряда, баланс или развитие навыка.</p></div>
+      <aside className="decision-mechanics"><Info size={17} /><span><b>Как это работает</b> Все варианты сразу закрывают происшествие. Указанная награда применяется один раз и появляется в дневнике и сводке смены.</span></aside>
+      <div className="decision-options">{incidentOptions.map(({ title, text, result, icon: Icon, tag }) => <button key={title} className={choice === title ? 'selected' : ''} onClick={() => setChoice(title)}><span className="decision-icon"><Icon /></span><span><b>{title}</b><small>{text}</small><strong>{result}</strong><em>{tag}</em></span><span className="radio-mark">{choice === title && <i />}</span></button>)}</div>
       <button className="primary-button decision-confirm" disabled={!choice} onClick={confirm}>ПОДТВЕРДИТЬ РЕШЕНИЕ <ArrowRight size={18} /></button>
       <p className="fallback-note"><Info size={15} /> Если время истечёт, система автоматически выберет «Проверить крепления».</p>
     </div>
@@ -542,13 +588,13 @@ function Incident({ state, setState, navigate, remaining }: { state: SavedState,
 
 function Skills({ state, elapsed }: { state: SavedState, elapsed: number }) {
   const activeJob = jobs.find(item => item.id === state.jobId)
-  const xpFor = (department: Department) => activeJob?.department === department ? Math.floor(elapsed / 60) : 0
+  const xpFor = (department: Department) => activeJob?.department === department ? Math.floor(elapsed / 60) + state.incidentXpBonus : 0
   const skillData = [
     { name: 'Механическая обработка', level: 1, xp: xpFor('mechanics'), max: 60, icon: Cog, color: 'orange', note: 'Точные детали, подшипники, крепёж' },
     { name: 'Энергетика', level: 1, xp: xpFor('power'), max: 60, icon: Zap, color: 'yellow', note: 'Силовые линии и накопители' },
     { name: 'Ремонт', level: 1, xp: xpFor('repair'), max: 60, icon: Wrench, color: 'blue', note: 'Диагностика и восстановление' },
   ]
-  return <div className="content-screen skills-screen"><div className="screen-heading compact"><div><span className="eyebrow"><span /> ПРОФИЛЬ РАБОТНИКА</span><h1>Навыки</h1><p>{state.name} · прогресс текущего Эпизода</p></div><div className="episode-reset"><Info size={18} /><span><b>Прогресс Эпизода</b><small>Сбросится после финала</small></span></div></div><div className="skill-grid">{skillData.map(({ name, level, xp, max, icon: Icon, color, note }) => <article className="skill-card" key={name}><div className={`skill-symbol ${color}`}><Icon /></div><div className="skill-main"><span className="skill-level">УРОВЕНЬ {level}</span><h3>{name}</h3><p>{note}</p><div className="skill-bar"><i style={{ width: `${Math.min(100, xp / max * 100)}%` }} /></div><small>{xp} / {max} XP до следующего уровня</small></div></article>)}</div><section className="knowledge"><div className="section-kicker">ОСОБЫЕ ЗНАНИЯ <span>{state.incidentResolved ? '1 ОТКРЫТО' : 'ПОКА НЕТ'}</span></div>{state.incidentResolved ? <div className="knowledge-grid"><article><Sparkles /><div><b>Опыт происшествия</b><p>Зафиксировано решение: {state.incidentChoice}.</p><span>ПРОИСШЕСТВИЕ P-01</span></div></article></div> : <div className="knowledge-empty"><Sparkles /><p>Особые знания открываются после значимых происшествий и решений.</p></div>}</section></div>
+  return <div className="content-screen skills-screen"><div className="screen-heading compact"><div><span className="eyebrow"><span /> ПРОФИЛЬ РАБОТНИКА</span><h1>Навыки</h1><p>{state.name} · прогресс текущего Эпизода</p></div><div className="episode-reset"><Info size={18} /><span><b>Прогресс Эпизода</b><small>Сбросится после финала</small></span></div></div><div className="skill-grid">{skillData.map(({ name, level, xp, max, icon: Icon, color, note }) => <article className="skill-card" key={name}><div className={`skill-symbol ${color}`}><Icon /></div><div className="skill-main"><span className="skill-level">УРОВЕНЬ {level}</span><h3>{name}</h3><p>{note}</p><div className="skill-bar"><i style={{ width: `${Math.min(100, xp / max * 100)}%` }} /></div><small>{xp} / {max} XP до следующего уровня</small></div></article>)}</div><section className="knowledge"><div className="section-kicker">ОСОБЫЕ ЗНАНИЯ <span>{state.incidentKnowledge ? '1 ОТКРЫТО' : 'ПОКА НЕТ'}</span></div>{state.incidentKnowledge ? <div className="knowledge-grid"><article><Sparkles /><div><b>{state.incidentKnowledge}</b><p>Получено после самостоятельного решения происшествия.</p><span>ПРОИСШЕСТВИЕ P-01</span></div></article></div> : <div className="knowledge-empty"><Sparkles /><p>Особые знания открываются, если выбранный исход прямо указывает такую награду.</p></div>}</section></div>
 }
 
 function DepartmentMap({ state, setState, navigate }: { state: SavedState, setState: React.Dispatch<React.SetStateAction<SavedState>>, navigate: (s: Screen) => void }) {

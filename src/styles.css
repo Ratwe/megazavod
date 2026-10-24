@@ -293,13 +293,18 @@ button.timeline-event { cursor: pointer; }
 .decision-copy { display: flex; align-items: baseline; gap: 18px; }
 .decision-copy span { font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: var(--orange-2); }
 .decision-copy p { color: var(--muted); font-size: 11px; }
+.decision-mechanics { margin: 0 0 12px; padding: 11px 13px; display: flex; align-items: flex-start; gap: 9px; color: var(--muted); border: 1px solid #29424a; background: #0c1518; font-size: 10px; line-height: 1.45; }
+.decision-mechanics svg { flex: 0 0 auto; color: var(--blue); }
+.decision-mechanics span { display: flex; flex-direction: column; }
+.decision-mechanics b { color: #dce2e3; text-transform: uppercase; font-size: 9px; }
 .decision-options { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
-.decision-options > button { min-height: 155px; padding: 15px; display: flex; align-items: flex-start; gap: 10px; text-align: left; border: 1px solid var(--line); background: #0e1417; cursor: pointer; position: relative; }
+.decision-options > button { min-height: 190px; padding: 15px; display: flex; align-items: flex-start; gap: 10px; text-align: left; border: 1px solid var(--line); background: #0e1417; cursor: pointer; position: relative; }
 .decision-options > button:hover, .decision-options > button.selected { border-color: var(--orange); background: #17130f; }
 .decision-icon { flex: 0 0 37px; width: 37px; height: 37px; display: grid; place-items: center; color: var(--orange-2); background: #21140f; }
 .decision-options button > span:nth-child(2) { display: flex; flex-direction: column; }
 .decision-options b { font-size: 15px; text-transform: uppercase; }
 .decision-options small { margin-top: 8px; color: var(--muted); font-size: 10px; line-height: 1.4; }
+.decision-options strong { margin-top: 10px; color: var(--orange-2); font: 9px/1.4 'IBM Plex Mono', monospace; }
 .decision-options em { margin-top: 8px; color: var(--green); font: normal 7px 'IBM Plex Mono', monospace; }
 .radio-mark { width: 17px; height: 17px; position: absolute; right: 10px; top: 10px; border: 1px solid #4b5a61; border-radius: 50%; display: grid; place-items: center; }
 .radio-mark i { width: 9px; height: 9px; background: var(--orange); border-radius: 50%; }
@@ -309,6 +314,7 @@ button.timeline-event { cursor: pointer; }
 .resolved-screen > svg { width: 80px; height: 80px; padding: 18px; color: var(--green); border: 1px solid var(--green); border-radius: 50%; margin-bottom: 20px; }
 .resolved-screen h1 { text-transform: uppercase; font-size: 38px; }
 .resolved-screen p { color: var(--muted); }
+.resolved-reward { margin: 4px 0 20px; padding: 9px 12px; color: var(--green); border: 1px solid #285342; font: 9px 'IBM Plex Mono', monospace; }
 
 .episode-reset { padding: 11px 14px; border: 1px solid var(--line); display: flex; gap: 10px; align-items: center; }
 .episode-reset svg { color: var(--orange); }
