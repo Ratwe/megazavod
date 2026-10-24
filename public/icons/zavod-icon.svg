@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="96" fill="#080b0d"/>
+  <path d="M100 96h312v72L214 344h198v72H100v-72l198-176H100z" fill="#ff5a18"/>
+  <path d="M128 122h256" stroke="#ff8a32" stroke-width="8" opacity=".55"/>
+  <text x="256" y="466" text-anchor="middle" fill="#89969c" font-family="monospace" font-size="34" letter-spacing="10">ЯРУС 47</text>
+</svg>

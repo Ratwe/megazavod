@@ -1,0 +1,20 @@
+{
+  "name": "ZAVOD — Немой лифт",
+  "short_name": "ZAVOD",
+  "description": "Кооперативная хроника Мегазавода",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#07090a",
+  "theme_color": "#080b0d",
+  "lang": "ru",
+  "icons": [
+    {
+      "src": "./icons/zavod-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

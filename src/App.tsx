@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
   AlertTriangle, ArrowLeft, ArrowRight, BookOpen, Box, Check, ChevronRight,
-  CircleGauge, Clock3, Cog, Factory, Gauge, Hammer, Info, Map, Menu, Pause,
-  Play, Radio, RotateCcw, ShieldAlert, Sparkles, Terminal, UserRound, Users,
-  Wrench, X, Zap,
+  CircleGauge, Clock3, Cog, Factory, Gauge, Info, ListChecks, Map, Menu,
+  Radio, RotateCcw, ShieldAlert, Sparkles, Target, Terminal, UserRound, Users,
+  Wrench, Zap,
 } from 'lucide-react'
+import { getTelegramUserName, getTelegramWebApp, haptic } from './telegram'
 
-type Screen = 'onboarding' | 'briefing' | 'floor' | 'journal' | 'skills' | 'map' | 'jobs' | 'incident' | 'chronicle' | 'terminal'
+type Screen = 'onboarding' | 'briefing' | 'floor' | 'journal' | 'skills' | 'map' | 'jobs' | 'incident' | 'chronicle' | 'terminal' | 'objectives'
 type Department = 'mechanics' | 'power' | 'repair'
 
 type Job = {
@@ -68,7 +69,7 @@ function loadState(): SavedState {
 
 function App() {
   const [state, setState] = useState<SavedState>(loadState)
-  const [nameDraft, setNameDraft] = useState(state.name)
+  const [nameDraft, setNameDraft] = useState(state.name || getTelegramUserName())
   const [now, setNow] = useState(Date.now())
   const [menuOpen, setMenuOpen] = useState(false)
   const [tickerVisible, setTickerVisible] = useState(true)
@@ -76,6 +77,45 @@ function App() {
   useEffect(() => {
     localStorage.setItem('zavod-state-v1', JSON.stringify(state))
   }, [state])
+
+  useEffect(() => {
+    const telegram = getTelegramWebApp()
+    if (!telegram) return
+    telegram.ready()
+  }, [])
+
+  useEffect(() => {
+    const telegram = getTelegramWebApp()
+    if (!telegram) return
+
+    if (state.jobId) telegram.enableClosingConfirmation?.()
+    else telegram.disableClosingConfirmation?.()
+  }, [state.jobId])
+
+  useEffect(() => {
+    const telegram = getTelegramWebApp()
+    if (!telegram) return
+
+    const backTargets: Partial<Record<Screen, Screen>> = {
+      briefing: 'onboarding', jobs: 'floor', journal: 'floor', skills: 'floor',
+      map: 'floor', incident: 'journal', chronicle: 'floor', terminal: 'floor', objectives: 'floor',
+    }
+    const target = backTargets[state.screen]
+    const handleBack = () => {
+      haptic('light')
+      if (target) setState(prev => ({ ...prev, screen: target }))
+    }
+
+    if (target) {
+      telegram.BackButton.show()
+      telegram.BackButton.onClick(handleBack)
+    } else telegram.BackButton.hide()
+
+    return () => {
+      telegram.BackButton.offClick(handleBack)
+      telegram.BackButton.hide()
+    }
+  }, [state.screen])
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1000)
@@ -93,7 +133,10 @@ function App() {
   const elapsed = state.jobStartedAt ? Math.max(0, Math.floor((now - state.jobStartedAt) / 1000)) : 0
   const jobProgress = job ? Math.min(job.target, 8 + Math.floor(elapsed / 8)) : 0
 
-  const navigate = (screen: Screen) => setState(prev => ({ ...prev, screen }))
+  const navigate = (screen: Screen) => {
+    haptic('selection')
+    setState(prev => ({ ...prev, screen }))
+  }
 
   const reset = () => {
     localStorage.removeItem('zavod-state-v1')
@@ -105,10 +148,12 @@ function App() {
   const createCharacter = () => {
     const clean = nameDraft.trim().slice(0, 24)
     if (clean.length < 2) return
+    haptic('success')
     setState(prev => ({ ...prev, name: clean, screen: 'briefing' }))
   }
 
   const beginJob = (selected: Job) => {
+    haptic('success')
     setState(prev => ({ ...prev, department: selected.department, jobId: selected.id, jobStartedAt: Date.now(), incidentCreatedAt: Date.now(), incidentResolved: false, incidentChoice: null, screen: 'journal' }))
   }
 
@@ -138,6 +183,7 @@ function App() {
           {state.screen === 'map' && <DepartmentMap state={state} setState={setState} navigate={navigate} />}
           {state.screen === 'terminal' && <NewsTerminal navigate={navigate} openProductionJobs={() => setState(prev => ({ ...prev, department: 'mechanics', screen: 'jobs' }))} />}
           {state.screen === 'chronicle' && <Chronicle state={state} navigate={navigate} />}
+          {state.screen === 'objectives' && <Objectives state={state} job={job} progress={jobProgress} setState={setState} navigate={navigate} />}
         </section>
         <BottomNav current={state.screen} navigate={navigate} />
       </main>
@@ -214,6 +260,7 @@ function DesktopRail({ state, progress, job, navigate }: { state: SavedState, pr
       <div className="rail-section">
         <span className="rail-label">ОПЕРАЦИЯ</span><b>Немой лифт</b><small>Ярус 47 · Эпизод 01</small>
         <div className="rail-progress"><span style={{ width: '34%' }} /></div><small>Общий прогресс 34%</small>
+        <button className="rail-plan" onClick={() => navigate('objectives')}><ListChecks size={15} /> Открыть план операции</button>
       </div>
       <div className="rail-section resource-list">
         <span className="rail-label">РЕСУРСЫ ЯРУСА</span>
@@ -235,10 +282,31 @@ function TopBar({ state, navigate, menuOpen, setMenuOpen, reset }: { state: Save
       <button className="mobile-brand" onClick={() => navigate('floor')}><span>Z</span><b>МЕГАЗАВОД</b></button>
       <div className="top-context"><span>ЭПИЗОД 01</span><b>НЕМОЙ ЛИФТ</b></div>
       <div className="top-stats"><span><Box size={15} /> 12</span><span><Zap size={15} /> 21</span><span><Wrench size={15} /> 8</span></div>
+      <button className="task-button" onClick={() => navigate('objectives')} aria-label="Открыть текущие задачи"><ListChecks size={19} /><span>ЗАДАЧИ</span><i /></button>
       <button className="icon-button" onClick={() => setMenuOpen(!menuOpen)} aria-label="Меню"><Menu size={21} /></button>
       {menuOpen && <div className="popover-menu"><button onClick={() => { navigate('chronicle'); setMenuOpen(false) }}><BookOpen size={16} /> Летопись</button><button onClick={reset}><RotateCcw size={16} /> Начать заново</button></div>}
     </header>
   )
+}
+
+function CurrentDirective({ state, job, progress, setState, navigate }: { state: SavedState, job: Job | null, progress: number, setState: React.Dispatch<React.SetStateAction<SavedState>>, navigate: (s: Screen) => void }) {
+  const urgent = Boolean(job && !state.incidentResolved)
+  const title = !job ? 'Получите первый рабочий наряд' : urgent ? 'Примите решение по происшествию' : 'Продолжайте текущий наряд'
+  const description = !job
+    ? 'Откройте токарный станок и возьмите задачу «Подготовить заготовки». Это запустит производство деталей для лифта.'
+    : urgent
+      ? 'Станок вибрирует. У вас есть 10 минут, чтобы выбрать действие; иначе сработает безопасный вариант.'
+      : `${job.title}: выполнено ${progress} из ${job.target}. Производство идёт, даже когда приложение закрыто.`
+  const action = () => {
+    if (!job) setState(prev => ({ ...prev, department: 'mechanics', screen: 'jobs' }))
+    else navigate(urgent ? 'incident' : 'journal')
+  }
+
+  return <section className={`current-directive ${urgent ? 'urgent' : ''}`}>
+    <div className="directive-icon">{urgent ? <AlertTriangle /> : <Target />}</div>
+    <div className="directive-copy"><span>{urgent ? 'ТРЕБУЕТ РЕШЕНИЯ' : 'ЧТО ДЕЛАТЬ СЕЙЧАС'}</span><h2>{title}</h2><p>{description}</p></div>
+    <div className="directive-actions"><button className="directive-primary" onClick={action}>{urgent ? 'ПРИНЯТЬ РЕШЕНИЕ' : job ? 'ОТКРЫТЬ ДНЕВНИК' : 'ПЕРЕЙТИ К НАРЯДАМ'} <ArrowRight size={16} /></button><button className="directive-secondary" onClick={() => navigate('objectives')}><ListChecks size={15} /> ВЕСЬ ПЛАН</button></div>
+  </section>
 }
 
 function Floor({ state, setState, job, progress, navigate }: { state: SavedState, setState: React.Dispatch<React.SetStateAction<SavedState>>, job: Job | null, progress: number, navigate: (s: Screen) => void }) {
@@ -251,6 +319,7 @@ function Floor({ state, setState, job, progress, navigate }: { state: SavedState
         <div><span className="eyebrow"><span /> ЯРУС 47 · СЕКТОР 03</span><h1>{dept.label}</h1><p>{dept.subtitle}</p></div>
         <button className="department-switch" onClick={() => navigate('map')}><Map size={17} /> СМЕНИТЬ ОТСЕК</button>
       </div>
+      <CurrentDirective state={state} job={job} progress={progress} setState={setState} navigate={navigate} />
       <div className="floor-layout">
         <div className={`floor-scene dept-${state.department}`}>
           <div className="scene-label">СХЕМА СЕКТОРА <b>03–{state.department === 'mechanics' ? 'А' : state.department === 'power' ? 'Б' : 'В'}</b></div>
@@ -284,6 +353,38 @@ function Floor({ state, setState, job, progress, navigate }: { state: SavedState
       </div>
     </div>
   )
+}
+
+function Objectives({ state, job, progress, setState, navigate }: { state: SavedState, job: Job | null, progress: number, setState: React.Dispatch<React.SetStateAction<SavedState>>, navigate: (s: Screen) => void }) {
+  const goToDepartment = (department: Department) => {
+    haptic('selection')
+    setState(prev => ({ ...prev, department, screen: 'jobs' }))
+  }
+  const urgent = Boolean(job && !state.incidentResolved)
+
+  const stages = [
+    { id: '01', title: 'Обследовать механизм', dept: 'Инженерия', detail: 'Причина остановки найдена: изношены опорные подшипники.', status: 'done', progress: 100, action: () => setState(prev => ({ ...prev, department: 'repair', screen: 'journal' })) },
+    { id: '02', title: 'Подготовить компоненты', dept: 'Производство', detail: 'Нужно изготовить 18 заготовок, затем 8 подшипников и 6 креплений.', status: job?.department === 'mechanics' ? 'active' : 'available', progress: job?.department === 'mechanics' ? Math.round(progress / job.target * 100) : 33, action: () => goToDepartment('mechanics') },
+    { id: '03', title: 'Восстановить питание', dept: 'Энергетика', detail: 'Проверить силовой щит и накопить энергию для запуска привода.', status: job?.department === 'power' ? 'active' : 'available', progress: job?.department === 'power' ? Math.round(progress / job.target * 100) : 25, action: () => goToDepartment('power') },
+    { id: '04', title: 'Восстановить привод', dept: 'Инженерия', detail: 'Откроется после поставки подшипников и восстановления силовой линии.', status: 'locked', progress: 0, action: () => undefined },
+  ]
+
+  return <div className="content-screen objectives-screen">
+    <button className="back-button" onClick={() => navigate('floor')}><ArrowLeft size={17} /> НА ЭТАЖ</button>
+    <div className="screen-heading compact"><div><span className="eyebrow"><span /> ЭПИЗОД 01 · ОБЩАЯ ЦЕЛЬ</span><h1>План операции</h1><p>Восстановить грузовой лифт яруса 47 совместными усилиями трёх отсеков.</p></div><div className="objective-total"><span>ОБЩИЙ ПРОГРЕСС</span><b>34%</b><div><i /></div></div></div>
+
+    <CurrentDirective state={state} job={job} progress={progress} setState={setState} navigate={navigate} />
+
+    <div className="objective-list">
+      {stages.map(stage => <article className={`objective-card ${stage.status}`} key={stage.id}>
+        <div className="objective-index">{stage.status === 'done' ? <Check size={18} /> : stage.id}</div>
+        <div className="objective-body"><div className="objective-title"><span>{stage.dept}</span><em>{stage.status === 'done' ? 'ЗАВЕРШЕНО' : stage.status === 'active' ? 'ВЫ РАБОТАЕТЕ' : stage.status === 'locked' ? 'ЗАБЛОКИРОВАНО' : 'ДОСТУПНО'}</em></div><h2>{stage.title}</h2><p>{stage.detail}</p><div className="objective-progress"><i style={{ width: `${stage.progress}%` }} /></div><small>{stage.progress}%</small></div>
+        {stage.status !== 'locked' && <button onClick={stage.action}>{stage.status === 'done' ? 'РЕЗУЛЬТАТ' : 'ПЕРЕЙТИ'} <ChevronRight size={17} /></button>}
+      </article>)}
+    </div>
+
+    <aside className="objective-hint"><Info size={19} /><div><b>Можно менять отсек и работу в любой момент.</b><p>Уже изготовленные ресурсы, опыт и принятые решения сохраняются. Заблокированные этапы откроются автоматически после выполнения зависимостей.</p></div></aside>
+  </div>
 }
 
 function Jobs({ department, activeJob, beginJob, back }: { department: Department, activeJob: Job | null, beginJob: (j: Job) => void, back: () => void }) {
