@@ -279,7 +279,7 @@ function Briefing({ name, continueGame }: { name: string, continueGame: () => vo
           ].map(({ num, title, dept, Icon }) => (
             <div className="operation-step" key={num}>
               <span className="step-num">{num}</span><span className="step-icon"><Icon size={22} /></span>
-              <div><b>{title}</b><span>{dept}</span></div><ChevronRight size={18} />
+              <div><b>{title}</b><span>{dept}</span></div><span className="step-status">ЭТАП</span>
             </div>
           ))}
           <div className="collective-goal"><Users size={20} /><div><b>Это общая операция</b><span>Работа каждого приближает запуск лифта. Отсек можно сменить в любой момент.</span></div></div>
@@ -415,7 +415,7 @@ function Objectives({ state, job, progress, operationProgress, setState, navigat
   const urgent = Boolean(job && state.incidentCreatedAt && !state.incidentResolved)
 
   const stages = [
-    { id: '01', title: 'Получить назначение', dept: 'Ярус 47', detail: job ? `Вы начали наряд «${job.title}».` : 'Выберите рабочее место и возьмите первый доступный наряд.', status: job ? 'done' : 'active', progress: job ? 100 : 0, action: () => goToDepartment('mechanics') },
+    { id: '01', title: 'Получить назначение', dept: 'Ярус 47', detail: job ? `Вы начали наряд «${job.title}».` : 'Выберите рабочее место и возьмите первый доступный наряд.', status: job ? 'done' : 'active', progress: job ? 100 : 0, action: () => job ? navigate('journal') : goToDepartment('mechanics') },
     { id: '02', title: 'Подготовить компоненты', dept: 'Производство', detail: 'Нужно изготовить 18 заготовок, затем 8 подшипников и 6 креплений.', status: job?.department === 'mechanics' ? 'active' : 'available', progress: job?.department === 'mechanics' ? Math.round(progress / job.target * 100) : 0, action: () => goToDepartment('mechanics') },
     { id: '03', title: 'Восстановить питание', dept: 'Энергетика', detail: 'Проверить силовой щит и накопить энергию для запуска привода.', status: job?.department === 'power' ? 'active' : 'available', progress: job?.department === 'power' ? Math.round(progress / job.target * 100) : 0, action: () => goToDepartment('power') },
     { id: '04', title: 'Восстановить привод', dept: 'Инженерия', detail: 'Откроется после поставки подшипников и восстановления силовой линии.', status: 'locked', progress: 0, action: () => undefined },
@@ -440,14 +440,21 @@ function Objectives({ state, job, progress, operationProgress, setState, navigat
 }
 
 function Jobs({ department, activeJob, beginJob, continueJob, back }: { department: Department, activeJob: Job | null, beginJob: (j: Job) => void, continueJob: () => void, back: () => void }) {
+  const [filter, setFilter] = useState<'available' | 'active' | 'completed'>('available')
   const available = jobs.filter(j => j.department === department).sort((a, b) => a.level - b.level)
+  const active = activeJob?.department === department ? [activeJob] : []
+  const visibleJobs = filter === 'available' ? available : filter === 'active' ? active : []
   return (
     <div className="content-screen jobs-screen">
       <button className="back-button" onClick={back}><ArrowLeft size={17} /> НАЗАД НА ЭТАЖ</button>
       <div className="screen-heading compact"><div><span className="eyebrow"><span /> {departments[department].label.toUpperCase()} · НАРЯДЫ</span><h1>Рабочее место</h1><p>Выберите задачу — работа продолжится после выхода из приложения.</p></div><div className="station-badge">{department === 'mechanics' ? <Cog size={40} /> : department === 'power' ? <Zap size={40} /> : <Wrench size={40} />}<span><b>{departments[department].short}</b><small>ОБОРУДОВАНИЕ ИСПРАВНО</small></span></div></div>
-      <div className="job-filter"><button className="active">ДОСТУПНЫЕ <span>{available.length}</span></button><button>В РАБОТЕ <span>{activeJob ? 1 : 0}</span></button><button>ЗАВЕРШЕНЫ <span>2</span></button></div>
+      <div className="job-filter" role="tablist" aria-label="Фильтр нарядов">
+        <button className={filter === 'available' ? 'active' : ''} onClick={() => setFilter('available')} role="tab" aria-selected={filter === 'available'}>ДОСТУПНЫЕ <span>{available.length}</span></button>
+        <button className={filter === 'active' ? 'active' : ''} onClick={() => setFilter('active')} role="tab" aria-selected={filter === 'active'}>В РАБОТЕ <span>{active.length}</span></button>
+        <button className={filter === 'completed' ? 'active' : ''} onClick={() => setFilter('completed')} role="tab" aria-selected={filter === 'completed'}>ЗАВЕРШЕНЫ <span>0</span></button>
+      </div>
       <div className="job-grid">
-        {available.map(item => {
+        {visibleJobs.map(item => {
           const locked = item.level > 1 && activeJob?.id !== item.id
           return <article className={`job-card ${locked ? 'locked' : ''} ${activeJob?.id === item.id ? 'selected' : ''}`} key={item.id}>
             <div className="job-icon">{item.icon === 'power' ? <Zap /> : item.icon === 'repair' ? <Wrench /> : <Cog />}</div>
@@ -456,6 +463,7 @@ function Jobs({ department, activeJob, beginJob, continueJob, back }: { departme
             <button disabled={locked} onClick={() => activeJob?.id === item.id ? continueJob() : beginJob(item)}>{activeJob?.id === item.id ? 'ПРОДОЛЖИТЬ' : locked ? 'НЕДОСТУПНО' : 'ВЗЯТЬ НАРЯД'} <ChevronRight size={17} /></button>
           </article>
         })}
+        {visibleJobs.length === 0 && <div className="job-list-empty"><CircleGauge size={30} /><h3>{filter === 'active' ? 'В этом отсеке нет активного наряда' : 'Завершённых нарядов пока нет'}</h3><p>{filter === 'active' ? 'Откройте «Доступные» и выберите работу или перейдите в отсек, где уже идёт смена.' : 'Завершённые задания появятся здесь после выполнения рабочего плана.'}</p></div>}
       </div>
       <div className="job-note"><Info size={18} /><span><b>Можно сменить работу в любой момент.</b> Уже произведённые детали и полученный опыт сохранятся.</span></div>
     </div>
@@ -520,7 +528,7 @@ function Skills({ state, elapsed }: { state: SavedState, elapsed: number }) {
     { name: 'Энергетика', level: 1, xp: xpFor('power'), max: 60, icon: Zap, color: 'yellow', note: 'Силовые линии и накопители' },
     { name: 'Ремонт', level: 1, xp: xpFor('repair'), max: 60, icon: Wrench, color: 'blue', note: 'Диагностика и восстановление' },
   ]
-  return <div className="content-screen skills-screen"><div className="screen-heading compact"><div><span className="eyebrow"><span /> ПРОФИЛЬ РАБОТНИКА</span><h1>Навыки</h1><p>{state.name} · прогресс текущего Эпизода</p></div><div className="episode-reset"><RotateCcw size={18} /><span><b>Прогресс Эпизода</b><small>Сбросится после финала</small></span></div></div><div className="skill-grid">{skillData.map(({ name, level, xp, max, icon: Icon, color, note }) => <article className="skill-card" key={name}><div className={`skill-symbol ${color}`}><Icon /></div><div className="skill-main"><span className="skill-level">УРОВЕНЬ {level}</span><h3>{name}</h3><p>{note}</p><div className="skill-bar"><i style={{ width: `${Math.min(100, xp / max * 100)}%` }} /></div><small>{xp} / {max} XP до следующего уровня</small></div><ChevronRight /></article>)}</div><section className="knowledge"><div className="section-kicker">ОСОБЫЕ ЗНАНИЯ <span>{state.incidentResolved ? '1 ОТКРЫТО' : 'ПОКА НЕТ'}</span></div>{state.incidentResolved ? <div className="knowledge-grid"><article><Sparkles /><div><b>Опыт происшествия</b><p>Зафиксировано решение: {state.incidentChoice}.</p><span>ПРОИСШЕСТВИЕ P-01</span></div></article></div> : <div className="knowledge-empty"><Sparkles /><p>Особые знания открываются после значимых происшествий и решений.</p></div>}</section></div>
+  return <div className="content-screen skills-screen"><div className="screen-heading compact"><div><span className="eyebrow"><span /> ПРОФИЛЬ РАБОТНИКА</span><h1>Навыки</h1><p>{state.name} · прогресс текущего Эпизода</p></div><div className="episode-reset"><Info size={18} /><span><b>Прогресс Эпизода</b><small>Сбросится после финала</small></span></div></div><div className="skill-grid">{skillData.map(({ name, level, xp, max, icon: Icon, color, note }) => <article className="skill-card" key={name}><div className={`skill-symbol ${color}`}><Icon /></div><div className="skill-main"><span className="skill-level">УРОВЕНЬ {level}</span><h3>{name}</h3><p>{note}</p><div className="skill-bar"><i style={{ width: `${Math.min(100, xp / max * 100)}%` }} /></div><small>{xp} / {max} XP до следующего уровня</small></div></article>)}</div><section className="knowledge"><div className="section-kicker">ОСОБЫЕ ЗНАНИЯ <span>{state.incidentResolved ? '1 ОТКРЫТО' : 'ПОКА НЕТ'}</span></div>{state.incidentResolved ? <div className="knowledge-grid"><article><Sparkles /><div><b>Опыт происшествия</b><p>Зафиксировано решение: {state.incidentChoice}.</p><span>ПРОИСШЕСТВИЕ P-01</span></div></article></div> : <div className="knowledge-empty"><Sparkles /><p>Особые знания открываются после значимых происшествий и решений.</p></div>}</section></div>
 }
 
 function DepartmentMap({ state, setState, navigate }: { state: SavedState, setState: React.Dispatch<React.SetStateAction<SavedState>>, navigate: (s: Screen) => void }) {
@@ -532,7 +540,26 @@ function NewsTerminal({ navigate, openProductionJobs }: { navigate: (s: Screen) 
 }
 
 function Chronicle({ state, job, progress, operationProgress, navigate }: { state: SavedState, job: Job | null, progress: number, operationProgress: number, navigate: (s: Screen) => void }) {
-  return <div className="content-screen chronicle-screen"><button className="back-button" onClick={() => navigate('floor')}><ArrowLeft size={17} /> НАЗАД</button><div className="chronicle-hero"><span className="eyebrow"><span /> ЛЕТОПИСЬ · ЭПИЗОД 01</span><h1>Немой лифт</h1><p>Ярус 47 снова слышит движение тросов. Операция продолжается — эта запись показывает возможный итог общего труда.</p><div className="chronicle-status"><i /> ОПЕРАЦИЯ В ПРОЦЕССЕ · {operationProgress}%</div></div><div className="chronicle-tabs"><button className="active">ЭПИЗОД</button><button>ЛИЧНАЯ ИСТОРИЯ</button><button>УЧАСТНИКИ <span>16</span></button></div><div className="chronicle-layout"><section><div className="section-kicker">КЛЮЧЕВЫЕ СОБЫТИЯ</div><div className="chronicle-events"><p><time>10:24</time><Zap /><span><b>Заказ на подшипники открыт</b>Инженеры подтвердили износ привода.</span></p><p><time>09:17</time><Users /><span><b>Энергетика восстановила резерв</b>Линия получила стабильное питание.</span></p><p><time>08:41</time><Wrench /><span><b>Шахта обследована</b>Причина остановки лифта найдена.</span></p></div></section><aside className="personal-contribution"><span className="rail-label">ВАШ ВКЛАД</span><div className="contribution-avatar">{state.name.slice(0, 1).toUpperCase()}</div><h3>{state.name}</h3><p>{job ? `Работает в отсеке «${departments[job.department].label}» и выполняет наряд «${job.title}».` : 'Смена ещё не началась. Первая запись появится после получения рабочего наряда.'}</p><div><span><b>{progress}</b> единиц</span><span><b>{state.incidentResolved ? 1 : 0}</b> решений</span><span><b>1 ур.</b> навык</span></div></aside></div></div>
+  const [tab, setTab] = useState<'episode' | 'personal' | 'participants'>('episode')
+  const participants = [
+    { name: state.name, department: job ? departments[job.department].label : 'Без назначения', contribution: progress, self: true },
+    { name: 'Марина К.', department: 'Инженерия', contribution: 6 },
+    { name: 'Сергей П.', department: 'Энергетика', contribution: 4 },
+    { name: 'Алексей В.', department: 'Производство', contribution: 3 },
+  ]
+
+  return <div className="content-screen chronicle-screen">
+    <button className="back-button" onClick={() => navigate('floor')}><ArrowLeft size={17} /> НАЗАД</button>
+    <div className="chronicle-hero"><span className="eyebrow"><span /> ЛЕТОПИСЬ · ЭПИЗОД 01</span><h1>Немой лифт</h1><p>Ярус 47 снова слышит движение тросов. Операция продолжается — эта запись показывает возможный итог общего труда.</p><div className="chronicle-status"><i /> ОПЕРАЦИЯ В ПРОЦЕССЕ · {operationProgress}%</div></div>
+    <div className="chronicle-tabs" role="tablist" aria-label="Разделы летописи">
+      <button className={tab === 'episode' ? 'active' : ''} onClick={() => setTab('episode')} role="tab" aria-selected={tab === 'episode'}>ЭПИЗОД</button>
+      <button className={tab === 'personal' ? 'active' : ''} onClick={() => setTab('personal')} role="tab" aria-selected={tab === 'personal'}>ЛИЧНАЯ ИСТОРИЯ</button>
+      <button className={tab === 'participants' ? 'active' : ''} onClick={() => setTab('participants')} role="tab" aria-selected={tab === 'participants'}>УЧАСТНИКИ <span>{participants.length}</span></button>
+    </div>
+    {tab === 'episode' && <div className="chronicle-layout"><section><div className="section-kicker">КЛЮЧЕВЫЕ СОБЫТИЯ</div><div className="chronicle-events"><p><time>10:24</time><Zap /><span><b>Заказ на подшипники открыт</b>Инженеры подтвердили износ привода.</span></p><p><time>09:17</time><Users /><span><b>Энергетика восстановила резерв</b>Линия получила стабильное питание.</span></p><p><time>08:41</time><Wrench /><span><b>Шахта обследована</b>Причина остановки лифта найдена.</span></p></div></section><aside className="personal-contribution"><span className="rail-label">ВАШ ВКЛАД</span><div className="contribution-avatar">{state.name.slice(0, 1).toUpperCase()}</div><h3>{state.name}</h3><p>{job ? `Работает в отсеке «${departments[job.department].label}» и выполняет наряд «${job.title}».` : 'Смена ещё не началась. Первая запись появится после получения рабочего наряда.'}</p><div><span><b>{progress}</b> единиц</span><span><b>{state.incidentResolved ? 1 : 0}</b> решений</span><span><b>1 ур.</b> навык</span></div></aside></div>}
+    {tab === 'personal' && <section className="personal-story-panel"><span className="rail-label">ЛИЧНАЯ ИСТОРИЯ</span><div className="contribution-avatar">{state.name.slice(0, 1).toUpperCase()}</div><div><h2>{state.name}</h2><p>{job ? `Смена начата в отсеке «${departments[job.department].label}». Текущий наряд: «${job.title}».` : 'Смена ещё не началась. Возьмите первый наряд, чтобы личная история начала пополняться.'}</p><div className="personal-story-stats"><span><b>{progress}</b> выполнено</span><span><b>{state.incidentResolved ? 1 : 0}</b> решений</span><span><b>{job ? 'В работе' : 'Ожидает'}</b> статус</span></div></div></section>}
+    {tab === 'participants' && <section className="participants-panel"><div className="section-kicker">УЧАСТНИКИ ОПЕРАЦИИ <span>{participants.length}</span></div><div className="participants-grid">{participants.map(participant => <article key={participant.name} className={participant.self ? 'self' : ''}><div>{participant.name.slice(0, 1).toUpperCase()}</div><span><b>{participant.name} {participant.self && <em>ВЫ</em>}</b><small>{participant.department}</small></span><strong>{participant.contribution}</strong></article>)}</div></section>}
+  </div>
 }
 
 function BottomNav({ current, navigate }: { current: Screen, navigate: (s: Screen) => void }) {
