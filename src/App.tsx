@@ -30,6 +30,7 @@ type SavedState = {
   jobStartedAt: number | null
   incidentAvailableAt: number | null
   incidentCreatedAt: number | null
+  incidentResolvedAt: number | null
   incidentResolved: boolean
   incidentChoice: string | null
 }
@@ -52,7 +53,7 @@ const departments = {
 
 const defaultSaved: SavedState = {
   name: '', screen: 'onboarding', department: 'mechanics', jobId: null,
-  jobStartedAt: null, incidentAvailableAt: null, incidentCreatedAt: null, incidentResolved: false, incidentChoice: null,
+  jobStartedAt: null, incidentAvailableAt: null, incidentCreatedAt: null, incidentResolvedAt: null, incidentResolved: false, incidentChoice: null,
 }
 
 const STORAGE_KEY = 'zavod-state-v2'
@@ -160,7 +161,7 @@ function App() {
 
   useEffect(() => {
     if (!state.incidentResolved && state.incidentCreatedAt && now - state.incidentCreatedAt >= 600_000) {
-      setState(prev => ({ ...prev, incidentResolved: true, incidentChoice: 'Проверить крепления' }))
+      setState(prev => ({ ...prev, incidentResolved: true, incidentResolvedAt: Date.now(), incidentChoice: 'Проверить крепления' }))
     }
   }, [now, state.incidentCreatedAt, state.incidentResolved])
 
@@ -192,7 +193,7 @@ function App() {
   const beginJob = (selected: Job) => {
     haptic('success')
     const startedAt = Date.now()
-    setState(prev => ({ ...prev, department: selected.department, jobId: selected.id, jobStartedAt: startedAt, incidentAvailableAt: startedAt + FIRST_INCIDENT_DELAY_MS, incidentCreatedAt: null, incidentResolved: false, incidentChoice: null, screen: 'journal' }))
+    setState(prev => ({ ...prev, department: selected.department, jobId: selected.id, jobStartedAt: startedAt, incidentAvailableAt: startedAt + FIRST_INCIDENT_DELAY_MS, incidentCreatedAt: null, incidentResolvedAt: null, incidentResolved: false, incidentChoice: null, screen: 'journal' }))
   }
 
   if (state.screen === 'onboarding') return <Onboarding name={nameDraft} setName={setNameDraft} submit={createCharacter} />
@@ -473,21 +474,40 @@ function Jobs({ department, activeJob, beginJob, continueJob, back }: { departme
 function Journal({ state, job, progress, elapsed, navigate }: { state: SavedState, job: Job | null, progress: number, elapsed: number, navigate: (s: Screen) => void }) {
   const time = (timestamp: number | null) => new Date(timestamp ?? Date.now()).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
   const completedCycles = Math.floor(elapsed / 60)
-  const recentCycles = job ? Array.from({ length: Math.min(completedCycles, 20) }, (_, index) => completedCycles - index - 1) : []
+  type JournalEntry =
+    | { kind: 'start', timestamp: number, order: number }
+    | { kind: 'cycle', timestamp: number, order: number, cycle: number }
+    | { kind: 'incident', timestamp: number, order: number }
+    | { kind: 'resolution', timestamp: number, order: number }
+  const entries: JournalEntry[] = []
+  if (job && state.jobStartedAt) {
+    entries.push({ kind: 'start', timestamp: state.jobStartedAt, order: 0 })
+    const firstVisibleCycle = Math.max(0, completedCycles - 20)
+    for (let cycle = firstVisibleCycle; cycle < completedCycles; cycle += 1) {
+      entries.push({ kind: 'cycle', timestamp: state.jobStartedAt + (cycle + 1) * 60_000, order: 1, cycle })
+    }
+  }
+  if (state.incidentCreatedAt) entries.push({ kind: 'incident', timestamp: state.incidentCreatedAt, order: 2 })
+  if (state.incidentResolved && state.incidentCreatedAt) entries.push({ kind: 'resolution', timestamp: state.incidentResolvedAt ?? state.incidentCreatedAt, order: 3 })
+  entries.sort((a, b) => a.timestamp - b.timestamp || a.order - b.order)
+
   return (
     <div className="content-screen journal-screen">
-      <div className="screen-heading compact"><div><span className="eyebrow"><span /> ЛИЧНЫЙ ЖУРНАЛ · {state.name.toUpperCase()}</span><h1>Рабочий дневник</h1><p>Записи смены формируются из подтверждённых событий.</p></div>{job && <div className="working-now"><span><i /> РАБОТА ИДЁТ</span><b>{job.title}</b><small>{progress} / {job.target} · {formatDuration(elapsed)}</small></div>}</div>
+      <div className="screen-heading compact"><div><span className="eyebrow"><span /> ЛИЧНЫЙ ЖУРНАЛ · {state.name.toUpperCase()}</span><h1>Рабочий дневник</h1><p>Записи смены идут от ранних событий к поздним.</p></div>{job && <div className="working-now"><span><i /> РАБОТА ИДЁТ</span><b>{job.title}</b><small>{progress} / {job.target} · {formatDuration(elapsed)}</small></div>}</div>
       {job && <ActionProgress job={job} elapsed={elapsed} />}
       <div className="journal-layout">
         <div className="timeline">
           {!job && <div className="journal-empty"><BookOpen size={28} /><h3>Смена ещё не началась</h3><p>Получите наряд на одном из рабочих мест. После этого здесь появятся только события вашей смены.</p><button onClick={() => navigate('objectives')}>ОТКРЫТЬ ПЛАН ОПЕРАЦИИ <ChevronRight size={16} /></button></div>}
-          {state.incidentCreatedAt && !state.incidentResolved && <button className="timeline-event incident-entry" onClick={() => navigate('incident')}><time>{time(state.incidentCreatedAt)}</time><span className="timeline-dot danger" /><div><span className="entry-type">АКТИВНОЕ ПРОИСШЕСТВИЕ</span><h3>Станок вибрирует</h3><p>Непонятный стук привода. Решение нужно принять в течение десяти минут.</p><b>ПРИНЯТЬ РЕШЕНИЕ <ChevronRight size={15} /></b></div></button>}
-          {state.incidentCreatedAt && state.incidentResolved && <div className="timeline-event resolved-entry"><time>{time(state.incidentCreatedAt)}</time><span className="timeline-dot success" /><div><span className="entry-type">РЕШЕНИЕ ЗАФИКСИРОВАНО</span><h3>{state.incidentChoice}</h3><p>Исход сохранён в журнале. Повторное изменение невозможно.</p></div></div>}
-          {job && recentCycles.map(cycle => {
-            const action = getWorkAction(job, cycle)
-            return <div className="timeline-event" key={cycle}><time>{time((state.jobStartedAt ?? Date.now()) + (cycle + 1) * 60_000)}</time><span className="timeline-dot" /><div><span className="entry-type">РАБОЧИЙ ЦИКЛ {String(cycle + 1).padStart(2, '0')}</span><p>{action.completed}</p><small>+1 XP · +1 к прогрессу наряда</small></div></div>
+          {job && entries.map(entry => {
+            if (entry.kind === 'start') return <div className="timeline-event" key={`start-${entry.timestamp}`}><time>{time(entry.timestamp)}</time><span className="timeline-dot" /><div><span className="entry-type">НАЧАЛО СМЕНЫ</span><p>Я получил наряд «{job.title}» и начал работу. Первые результаты появятся после завершения рабочего цикла.</p></div></div>
+            if (entry.kind === 'cycle') {
+              const action = getWorkAction(job, entry.cycle)
+              return <div className="timeline-event" key={`cycle-${entry.cycle}`}><time>{time(entry.timestamp)}</time><span className="timeline-dot" /><div><span className="entry-type">РАБОЧИЙ ЦИКЛ {String(entry.cycle + 1).padStart(2, '0')}</span><p>{action.completed}</p><small>+1 XP · +1 к прогрессу наряда</small></div></div>
+            }
+            if (entry.kind === 'incident' && !state.incidentResolved) return <button className="timeline-event incident-entry" key={`incident-${entry.timestamp}`} onClick={() => navigate('incident')}><time>{time(entry.timestamp)}</time><span className="timeline-dot danger" /><div><span className="entry-type">АКТИВНОЕ ПРОИСШЕСТВИЕ</span><h3>Станок вибрирует</h3><p>Непонятный стук привода. Решение нужно принять в течение десяти минут.</p><b>ПРИНЯТЬ РЕШЕНИЕ <ChevronRight size={15} /></b></div></button>
+            if (entry.kind === 'incident') return <div className="timeline-event incident-entry" key={`incident-${entry.timestamp}`}><time>{time(entry.timestamp)}</time><span className="timeline-dot danger" /><div><span className="entry-type">ПРОИСШЕСТВИЕ</span><h3>Станок вибрирует</h3><p>Привод издал неровный металлический стук. Потребовалось решение.</p></div></div>
+            return <div className="timeline-event resolved-entry" key={`resolution-${entry.timestamp}`}><time>{time(entry.timestamp)}</time><span className="timeline-dot success" /><div><span className="entry-type">РЕШЕНИЕ ЗАФИКСИРОВАНО</span><h3>{state.incidentChoice}</h3><p>Исход сохранён в журнале. Повторное изменение невозможно.</p></div></div>
           })}
-          {job && <div className="timeline-event"><time>{time(state.jobStartedAt)}</time><span className="timeline-dot" /><div><span className="entry-type">НАЧАЛО СМЕНЫ</span><p>Я получил наряд «{job.title}» и начал работу. Первые результаты появятся после завершения рабочего цикла.</p></div></div>}
         </div>
         <aside className="shift-summary"><span className="rail-label">СВОДКА СМЕНЫ</span><div className="summary-number"><b>{progress}</b><span>ЕДИНИЦ<br />ПРОИЗВЕДЕНО</span></div><div className="summary-stats"><p><span>Опыт</span><b>+{Math.floor(elapsed / 60)} XP</b></p><p><span>Время</span><b>{formatDuration(elapsed)}</b></p><p><span>Происшествия</span><b>{state.incidentCreatedAt ? 1 : 0}</b></p></div><button onClick={() => navigate('floor')}>ВЕРНУТЬСЯ НА ЭТАЖ</button></aside>
       </div>
@@ -504,7 +524,7 @@ function Incident({ state, setState, navigate, remaining }: { state: SavedState,
   ]
   const confirm = () => {
     if (!choice) return
-    setState(prev => ({ ...prev, incidentResolved: true, incidentChoice: choice, screen: 'journal' }))
+    setState(prev => ({ ...prev, incidentResolved: true, incidentResolvedAt: Date.now(), incidentChoice: choice, screen: 'journal' }))
   }
   if (state.incidentResolved) return <div className="content-screen resolved-screen"><Check size={44} /><span className="eyebrow"><span /> ИСХОД ЗАФИКСИРОВАН</span><h1>{state.incidentChoice}</h1><p>Решение уже применено и останется в истории Эпизода.</p><button className="primary-button" onClick={() => navigate('journal')}>ВЕРНУТЬСЯ В ДНЕВНИК</button></div>
   return (
@@ -536,7 +556,8 @@ function DepartmentMap({ state, setState, navigate }: { state: SavedState, setSt
 }
 
 function NewsTerminal({ navigate, openProductionJobs }: { navigate: (s: Screen) => void, openProductionJobs: () => void }) {
-  return <div className="content-screen terminal-page"><button className="back-button" onClick={() => navigate('floor')}><ArrowLeft size={17} /> К СХЕМЕ ЭТАЖА</button><div className="screen-heading compact"><div><span className="eyebrow"><span /> ИНФО-ТЕРМИНАЛ · ЯРУС 47</span><h1>Новости яруса</h1><p>Запросы отсеков и подтверждённые изменения операции.</p></div><div className="terminal-live"><i /> СЕТЬ АКТИВНА</div></div><div className="news-list">{news.map((item, index) => <article className={item.critical ? 'critical' : ''} key={item.time}><time>{item.time}</time><div className="news-line"><span>{item.category}</span><i /></div><div><h3>{item.title}</h3><p>{item.body}</p>{index === 0 && <button onClick={openProductionJobs}>ПЕРЕЙТИ К НАРЯДУ <ChevronRight size={15} /></button>}</div></article>)}</div><div className="terminal-footer"><Radio size={17} /> ПОКАЗАНЫ СООБЩЕНИЯ ТЕКУЩЕГО ЭПИЗОДА</div></div>
+  const chronologicalNews = [...news].sort((a, b) => a.time.localeCompare(b.time))
+  return <div className="content-screen terminal-page"><button className="back-button" onClick={() => navigate('floor')}><ArrowLeft size={17} /> К СХЕМЕ ЭТАЖА</button><div className="screen-heading compact"><div><span className="eyebrow"><span /> ИНФО-ТЕРМИНАЛ · ЯРУС 47</span><h1>Новости яруса</h1><p>Запросы отсеков и подтверждённые изменения операции — от ранних к поздним.</p></div><div className="terminal-live"><i /> СЕТЬ АКТИВНА</div></div><div className="news-list">{chronologicalNews.map(item => <article className={item.critical ? 'critical' : ''} key={item.time}><time>{item.time}</time><div className="news-line"><span>{item.category}</span><i /></div><div><h3>{item.title}</h3><p>{item.body}</p>{item.critical && <button onClick={openProductionJobs}>ПЕРЕЙТИ К НАРЯДУ <ChevronRight size={15} /></button>}</div></article>)}</div><div className="terminal-footer"><Radio size={17} /> ПОКАЗАНЫ СООБЩЕНИЯ ТЕКУЩЕГО ЭПИЗОДА</div></div>
 }
 
 function Chronicle({ state, job, progress, operationProgress, navigate }: { state: SavedState, job: Job | null, progress: number, operationProgress: number, navigate: (s: Screen) => void }) {
@@ -556,7 +577,7 @@ function Chronicle({ state, job, progress, operationProgress, navigate }: { stat
       <button className={tab === 'personal' ? 'active' : ''} onClick={() => setTab('personal')} role="tab" aria-selected={tab === 'personal'}>ЛИЧНАЯ ИСТОРИЯ</button>
       <button className={tab === 'participants' ? 'active' : ''} onClick={() => setTab('participants')} role="tab" aria-selected={tab === 'participants'}>УЧАСТНИКИ <span>{participants.length}</span></button>
     </div>
-    {tab === 'episode' && <div className="chronicle-layout"><section><div className="section-kicker">КЛЮЧЕВЫЕ СОБЫТИЯ</div><div className="chronicle-events"><p><time>10:24</time><Zap /><span><b>Заказ на подшипники открыт</b>Инженеры подтвердили износ привода.</span></p><p><time>09:17</time><Users /><span><b>Энергетика восстановила резерв</b>Линия получила стабильное питание.</span></p><p><time>08:41</time><Wrench /><span><b>Шахта обследована</b>Причина остановки лифта найдена.</span></p></div></section><aside className="personal-contribution"><span className="rail-label">ВАШ ВКЛАД</span><div className="contribution-avatar">{state.name.slice(0, 1).toUpperCase()}</div><h3>{state.name}</h3><p>{job ? `Работает в отсеке «${departments[job.department].label}» и выполняет наряд «${job.title}».` : 'Смена ещё не началась. Первая запись появится после получения рабочего наряда.'}</p><div><span><b>{progress}</b> единиц</span><span><b>{state.incidentResolved ? 1 : 0}</b> решений</span><span><b>1 ур.</b> навык</span></div></aside></div>}
+    {tab === 'episode' && <div className="chronicle-layout"><section><div className="section-kicker">КЛЮЧЕВЫЕ СОБЫТИЯ · ОТ РАННИХ К ПОЗДНИМ</div><div className="chronicle-events"><p><time>08:41</time><Wrench /><span><b>Шахта обследована</b>Причина остановки лифта найдена.</span></p><p><time>09:17</time><Users /><span><b>Энергетика восстановила резерв</b>Линия получила стабильное питание.</span></p><p><time>10:24</time><Zap /><span><b>Заказ на подшипники открыт</b>Инженеры подтвердили износ привода.</span></p></div></section><aside className="personal-contribution"><span className="rail-label">ВАШ ВКЛАД</span><div className="contribution-avatar">{state.name.slice(0, 1).toUpperCase()}</div><h3>{state.name}</h3><p>{job ? `Работает в отсеке «${departments[job.department].label}» и выполняет наряд «${job.title}».` : 'Смена ещё не началась. Первая запись появится после получения рабочего наряда.'}</p><div><span><b>{progress}</b> единиц</span><span><b>{state.incidentResolved ? 1 : 0}</b> решений</span><span><b>1 ур.</b> навык</span></div></aside></div>}
     {tab === 'personal' && <section className="personal-story-panel"><span className="rail-label">ЛИЧНАЯ ИСТОРИЯ</span><div className="contribution-avatar">{state.name.slice(0, 1).toUpperCase()}</div><div><h2>{state.name}</h2><p>{job ? `Смена начата в отсеке «${departments[job.department].label}». Текущий наряд: «${job.title}».` : 'Смена ещё не началась. Возьмите первый наряд, чтобы личная история начала пополняться.'}</p><div className="personal-story-stats"><span><b>{progress}</b> выполнено</span><span><b>{state.incidentResolved ? 1 : 0}</b> решений</span><span><b>{job ? 'В работе' : 'Ожидает'}</b> статус</span></div></div></section>}
     {tab === 'participants' && <section className="participants-panel"><div className="section-kicker">УЧАСТНИКИ ОПЕРАЦИИ <span>{participants.length}</span></div><div className="participants-grid">{participants.map(participant => <article key={participant.name} className={participant.self ? 'self' : ''}><div>{participant.name.slice(0, 1).toUpperCase()}</div><span><b>{participant.name} {participant.self && <em>ВЫ</em>}</b><small>{participant.department}</small></span><strong>{participant.contribution}</strong></article>)}</div></section>}
   </div>
