@@ -562,18 +562,27 @@ button.timeline-event { cursor: pointer; }
 .episode-code { margin: 38px 0 5px; color: var(--orange); font: 10px 'IBM Plex Mono', monospace; letter-spacing: .15em; }
 .briefing-lead h1 { margin: 0; font-size: clamp(70px, 9vw, 125px); line-height: .74; letter-spacing: -.06em; text-transform: uppercase; transform: scaleX(.85); transform-origin: left; }
 .lead-text { max-width: 440px; margin: 32px 0 22px; color: #98a4a9; font-size: 16px; line-height: 1.55; }
+.lead-detail { max-width: 470px; margin: -10px 0 20px; color: #738188; font-size: 11px; line-height: 1.55; }
+.briefing-transcript { max-width: 470px; margin: 0 0 14px; padding: 13px 15px; border: 1px solid #3a484e; background: #0a1013; }
+.briefing-transcript span, .briefing-transcript small { color: #718087; font: 7px 'IBM Plex Mono', monospace; letter-spacing: .09em; }
+.briefing-transcript p { margin: 8px 0; color: #d4dadb; font: italic 12px/1.5 Georgia, serif; }
+.briefing-transcript small { color: #a85d4e; }
 .briefing-alert { max-width: 430px; padding: 13px 15px; display: flex; gap: 11px; border: 1px solid #5d2d24; background: #1c100e; }
 .briefing-alert svg { color: var(--red); }
 .briefing-alert div { display: flex; flex-direction: column; }
 .briefing-alert b { font-size: 12px; }
 .briefing-alert span { color: #9d7770; font-size: 10px; }
+.episode-facts { max-width: 430px; margin-top: 11px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.episode-facts span { padding: 9px 7px; display: flex; flex-direction: column; color: #65747a; border: 1px solid var(--line); font: 7px 'IBM Plex Mono', monospace; }
+.episode-facts b { color: #cbd2d3; font-size: 11px; }
 .operation-plan { padding: 26px; border: 1px solid #36464d; background: #0e1518e8; box-shadow: 0 25px 70px #0009; }
-.operation-step { min-height: 70px; display: grid; grid-template-columns: 28px 42px 1fr auto; align-items: center; gap: 10px; border-bottom: 1px solid var(--line); }
+.operation-step { min-height: 108px; display: grid; grid-template-columns: 28px 42px 1fr auto; align-items: center; gap: 10px; border-bottom: 1px solid var(--line); }
 .step-num { color: #536168; font: 10px 'IBM Plex Mono', monospace; }
 .step-icon { width: 38px; height: 38px; display: grid; place-items: center; background: #20140f; color: var(--orange); border: 1px solid #5a301d; }
 .operation-step > div { display: flex; flex-direction: column; }
 .operation-step b { text-transform: uppercase; font-size: 14px; }
 .operation-step div span { color: var(--muted); font-size: 10px; }
+.operation-step p { margin: 6px 0 0; color: #718087; font-size: 9px; line-height: 1.4; }
 .step-status { color: #68767c; font: 8px 'IBM Plex Mono', monospace; letter-spacing: .08em; }
 .collective-goal { margin: 17px 0; padding: 12px; display: flex; gap: 10px; background: #0a1013; border: 1px solid var(--line); }
 .collective-goal svg { color: var(--blue); }
