@@ -147,6 +147,61 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--orange); ou
 .objective-hint > svg { flex: 0 0 auto; color: var(--blue); }
 .objective-hint b { font-size: 12px; }
 .objective-hint p { margin: 4px 0 0; color: var(--muted); font-size: 10px; line-height: 1.45; }
+.progress-hierarchy { margin-top: 20px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 9px; }
+.progress-hierarchy article { min-height: 132px; padding: 13px; display: grid; grid-template-columns: 25px 1fr auto; gap: 9px; border: 1px solid var(--line); background: #0d1316; }
+.progress-hierarchy article > span { color: #536168; font: 9px 'IBM Plex Mono', monospace; }
+.progress-hierarchy article > div { min-width: 0; display: flex; flex-direction: column; }
+.progress-hierarchy small { color: var(--orange-2); font: 7px 'IBM Plex Mono', monospace; letter-spacing: .08em; }
+.progress-hierarchy b { margin: 7px 0 4px; min-height: 32px; font-size: 12px; text-transform: uppercase; }
+.progress-hierarchy em { color: var(--muted); font: normal 8px 'IBM Plex Mono', monospace; }
+.progress-hierarchy article > div > div { height: 4px; margin-top: auto; background: #202a2e; }
+.progress-hierarchy i { display: block; height: 100%; background: var(--orange); }
+.progress-hierarchy article > strong { color: #a8b2b6; font: 10px 'IBM Plex Mono', monospace; }
+.progress-hierarchy article.complete { border-color: #27533f; }
+.progress-hierarchy article.complete i { background: var(--green); }
+.mission-tree { margin-top: 24px; display: grid; gap: 12px; }
+.mission-card { border: 1px solid var(--line); background: #0a1013; }
+.mission-card.active { border-color: #80421f; box-shadow: inset 3px 0 var(--orange); }
+.mission-card.done { border-color: #24513f; }
+.mission-card.locked { opacity: .66; }
+.mission-header { width: 100%; min-height: 105px; padding: 16px; display: grid; grid-template-columns: 56px minmax(0, 1fr) auto 22px; align-items: center; gap: 15px; color: inherit; border: 0; background: transparent; text-align: left; cursor: pointer; }
+.mission-header:hover { background: #11191d; }
+.mission-code { width: 52px; height: 52px; display: grid; place-items: center; color: var(--orange-2); border: 1px solid #65381f; background: #20140f; font: 9px 'IBM Plex Mono', monospace; }
+.mission-card.done .mission-code { color: var(--green); border-color: #24513f; background: #0e201a; }
+.mission-header > span:nth-child(2) { min-width: 0; display: flex; flex-direction: column; }
+.mission-header small { color: var(--orange-2); font: 7px 'IBM Plex Mono', monospace; letter-spacing: .09em; }
+.mission-card.done .mission-header small { color: var(--green); }
+.mission-card.locked .mission-header small { color: var(--muted); }
+.mission-header b { margin: 5px 0 3px; font-size: 19px; text-transform: uppercase; }
+.mission-header em { color: var(--muted); font-size: 10px; font-style: normal; }
+.mission-header > strong { color: #c0c7c9; font: 14px 'IBM Plex Mono', monospace; }
+.mission-header > svg { color: #718087; transition: transform .2s ease; }
+.mission-header[aria-expanded='true'] > svg { transform: rotate(90deg); }
+.package-list { padding: 0 16px 16px 87px; display: grid; grid-template-columns: repeat(2, 1fr); gap: 9px; }
+.package-card { min-height: 120px; padding: 13px; border: 1px solid var(--line); background: #0e1518; }
+.package-card.active { border-color: #70401f; background: #17120f; }
+.package-card.done { border-color: #244c3c; }
+.package-card.locked { opacity: .55; }
+.package-heading { display: grid; grid-template-columns: 29px 1fr auto; align-items: center; gap: 9px; }
+.package-heading > span { width: 27px; height: 27px; display: grid; place-items: center; color: var(--orange-2); border: 1px solid #59402e; font: 7px 'IBM Plex Mono', monospace; }
+.package-card.done .package-heading > span { color: var(--green); border-color: #285441; }
+.package-heading > div { display: flex; flex-direction: column; }
+.package-heading small { color: var(--muted); font: 6px 'IBM Plex Mono', monospace; }
+.package-heading b { margin-top: 3px; font-size: 11px; text-transform: uppercase; }
+.package-heading > strong { color: #9da8ac; font: 9px 'IBM Plex Mono', monospace; }
+.order-chain { margin: 15px 0 11px; display: grid; grid-template-columns: repeat(6, 1fr); gap: 5px; }
+.order-chain span { height: 24px; display: grid; place-items: center; color: #59666c; border: 1px solid #2a363b; font: 7px 'IBM Plex Mono', monospace; }
+.order-chain span.active { color: var(--orange-2); border-color: var(--orange); background: #26150e; }
+.order-chain span.done { color: var(--green); border-color: #285441; background: #0d1e18; }
+.package-progress { height: 3px; background: #202a2e; }
+.package-progress i { display: block; height: 100%; background: var(--orange); }
+.package-card.done .package-progress i { background: var(--green); }
+.episode-finale { margin-top: 18px; padding: 22px; display: grid; grid-template-columns: 48px 1fr auto; align-items: center; gap: 16px; border: 1px solid #2b6a50; background: linear-gradient(90deg, #0d241b, #0d1516); }
+.episode-finale > svg { width: 44px; height: 44px; padding: 9px; color: var(--green); border: 1px solid var(--green); border-radius: 50%; }
+.episode-finale span { color: var(--green); font: 8px 'IBM Plex Mono', monospace; letter-spacing: .1em; }
+.episode-finale h2 { margin: 4px 0; text-transform: uppercase; }
+.episode-finale p { margin: 0; color: var(--muted); font-size: 11px; }
+.episode-finale button { min-height: 42px; padding: 0 13px; display: flex; align-items: center; gap: 8px; color: #07130e; border: 0; background: var(--green); cursor: pointer; font-size: 9px; font-weight: 700; }
 
 .floor-layout { display: grid; grid-template-columns: minmax(500px, 1fr) 260px; gap: 18px; }
 .floor-scene { min-height: 610px; position: relative; overflow: hidden; border: 1px solid #334047; background: radial-gradient(circle at 50% 45%, #18262c 0%, #0c1316 38%, #06090b 76%); box-shadow: inset 0 0 80px #000a; }
@@ -387,6 +442,9 @@ button.timeline-event { cursor: pointer; }
 .chronicle-events svg { color: var(--orange); }
 .chronicle-events span { display: flex; flex-direction: column; color: var(--muted); font-size: 11px; }
 .chronicle-events b { color: #e2e6e4; text-transform: uppercase; font-size: 13px; margin-bottom: 4px; }
+.chronicle-empty { min-height: 150px; padding: 24px; display: flex; align-items: center; justify-content: center; gap: 12px; color: var(--muted); border: 1px dashed #334148; }
+.chronicle-empty svg { color: #607078; }
+.chronicle-empty p { margin: 0; font-size: 11px; }
 .personal-contribution { padding: 20px; text-align: center; border: 1px solid #74401f; background: linear-gradient(#1a120e, #0e1315); }
 .contribution-avatar { width: 55px; height: 55px; margin: 18px auto 10px; display: grid; place-items: center; background: var(--orange); color: #190b05; font-size: 25px; font-weight: 800; }
 .personal-contribution h3 { margin: 8px 0; font-size: 21px; }
@@ -510,6 +568,16 @@ button.timeline-event { cursor: pointer; }
   .directive-actions { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr auto; }
   .directive-actions button { min-height: 44px; }
   .objective-total { width: 100%; }
+  .progress-hierarchy { grid-template-columns: 1fr 1fr; }
+  .progress-hierarchy article { min-height: 122px; }
+  .mission-header { grid-template-columns: 43px minmax(0, 1fr) auto 18px; padding: 13px; gap: 10px; }
+  .mission-code { width: 41px; height: 41px; }
+  .mission-header b { font-size: 15px; }
+  .mission-header em { font-size: 9px; }
+  .mission-header > strong { font-size: 11px; }
+  .package-list { padding: 0 12px 12px; grid-template-columns: 1fr; }
+  .episode-finale { grid-template-columns: 42px 1fr; padding: 17px; }
+  .episode-finale button { grid-column: 1 / -1; justify-content: space-between; }
   .objective-card { grid-template-columns: 36px minmax(0, 1fr); padding: 14px; gap: 11px; }
   .objective-index { width: 34px; height: 34px; }
   .objective-card > button { grid-column: 1 / -1; min-height: 44px; justify-content: space-between; }
@@ -573,6 +641,7 @@ button.timeline-event { cursor: pointer; }
   .briefing-lead h1 { font-size: 65px; }
   .operation-step { grid-template-columns: 24px 38px 1fr; }
   .step-status { display: none; }
+  .progress-hierarchy { grid-template-columns: 1fr; }
 }
 
 @media (prefers-reduced-motion: reduce) {

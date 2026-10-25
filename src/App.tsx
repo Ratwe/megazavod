@@ -28,6 +28,7 @@ type SavedState = {
   department: Department
   jobId: string | null
   jobStartedAt: number | null
+  episodeStartedAt: number | null
   incidentAvailableAt: number | null
   incidentCreatedAt: number | null
   incidentResolvedAt: number | null
@@ -39,12 +40,12 @@ type SavedState = {
 }
 
 const jobs: Job[] = [
-  { id: 'J_BEARING', title: 'Изготовить подшипники', description: 'Комплектующие главного привода', department: 'mechanics', level: 2, reward: '+8 XP · +1 деталь', target: 24, output: 'Подшипник', icon: 'bearing' },
-  { id: 'J_BLANK', title: 'Подготовить заготовки', description: 'Поставки для производственной линии', department: 'mechanics', level: 1, reward: '+4 XP · +1 заготовка', target: 18, output: 'Заготовка', icon: 'blank' },
-  { id: 'J_FASTENER', title: 'Проверить крепления', description: 'Заказ инженерного отсека', department: 'mechanics', level: 1, reward: '+6 XP · +1 крепёж', target: 12, output: 'Крепёж', icon: 'bolt' },
-  { id: 'J_GENERATE', title: 'Стабилизировать накопитель', description: 'Вернуть питание на ярус 47', department: 'power', level: 1, reward: '+6 XP · +4 энергии/ч', target: 16, output: 'Энергия', icon: 'power' },
-  { id: 'J_DIAG_POWER', title: 'Проверить силовой щит', description: 'Найти причину потери мощности', department: 'power', level: 1, reward: '+8 XP · диагностика', target: 10, output: 'Диагностика', icon: 'power' },
-  { id: 'J_DIAG_REPAIR', title: 'Обследовать шахту', description: 'Определить состояние привода', department: 'repair', level: 1, reward: '+8 XP · диагностика', target: 14, output: 'Осмотр', icon: 'repair' },
+  { id: 'J_BEARING', title: 'Изготовить подшипники', description: 'Комплектующие главного привода', department: 'mechanics', level: 2, reward: '+8 XP · +1 деталь', target: 20, output: 'Подшипник', icon: 'bearing' },
+  { id: 'J_BLANK', title: 'Подготовить заготовки', description: 'Поставки для производственной линии', department: 'mechanics', level: 1, reward: '+4 XP · +1 заготовка', target: 20, output: 'Заготовка', icon: 'blank' },
+  { id: 'J_FASTENER', title: 'Проверить крепления', description: 'Заказ инженерного отсека', department: 'mechanics', level: 1, reward: '+6 XP · +1 крепёж', target: 20, output: 'Крепёж', icon: 'bolt' },
+  { id: 'J_GENERATE', title: 'Стабилизировать накопитель', description: 'Вернуть питание на ярус 47', department: 'power', level: 1, reward: '+6 XP · +4 энергии/ч', target: 20, output: 'Энергия', icon: 'power' },
+  { id: 'J_DIAG_POWER', title: 'Проверить силовой щит', description: 'Найти причину потери мощности', department: 'power', level: 1, reward: '+8 XP · диагностика', target: 20, output: 'Диагностика', icon: 'power' },
+  { id: 'J_DIAG_REPAIR', title: 'Обследовать шахту', description: 'Определить состояние привода', department: 'repair', level: 1, reward: '+8 XP · диагностика', target: 20, output: 'Осмотр', icon: 'repair' },
   { id: 'J_REPAIR', title: 'Восстановить привод', description: 'Смонтировать исправный узел', department: 'repair', level: 2, reward: '+12 XP · ремонт', target: 20, output: 'Ремонт', icon: 'repair' },
 ]
 
@@ -56,12 +57,16 @@ const departments = {
 
 const defaultSaved: SavedState = {
   name: '', screen: 'onboarding', department: 'mechanics', jobId: null,
-  jobStartedAt: null, incidentAvailableAt: null, incidentCreatedAt: null, incidentResolvedAt: null, incidentResolved: false, incidentChoice: null,
+  jobStartedAt: null, episodeStartedAt: null, incidentAvailableAt: null, incidentCreatedAt: null, incidentResolvedAt: null, incidentResolved: false, incidentChoice: null,
   incidentProgressBonus: 0, incidentXpBonus: 0, incidentKnowledge: null,
 }
 
 const STORAGE_KEY = 'zavod-state-v2'
 const FIRST_INCIDENT_DELAY_MS = 3 * 60 * 1000
+const ORDER_WORK_UNITS = 20
+const PACKAGE_WORK_UNITS = 120
+const MISSION_WORK_UNITS = 480
+const EPISODE_WORK_UNITS = 1440
 
 const news = [
   { time: '10:24', category: 'Производство', title: 'Требуются подшипники для лифта', body: 'Инженерный отсек открыл запрос на восемь подшипников. Производственная линия готова принять наряд.', critical: true },
@@ -102,6 +107,27 @@ const incidentOptions = [
   },
 ]
 
+const episodeMissions = [
+  {
+    code: 'М-01',
+    title: 'Найти причину остановки',
+    story: 'Открывает истинную причину поломки лифта и план восстановления.',
+    packages: ['Снять первичные показания', 'Обследовать шахту', 'Проверить силовой контур', 'Свести карту неисправностей'],
+  },
+  {
+    code: 'М-02',
+    title: 'Подготовить восстановление',
+    story: 'Возвращает ярусу производство деталей и резерв мощности.',
+    packages: ['Подготовить заготовки', 'Изготовить подшипники', 'Собрать крепёжный комплект', 'Доставить компоненты'],
+  },
+  {
+    code: 'М-03',
+    title: 'Вернуть лифт в строй',
+    story: 'Запускает грузовой лифт и закрывает Эпизод 01.',
+    packages: ['Смонтировать привод', 'Подать резервное питание', 'Провести нагрузочные испытания', 'Запустить грузовой лифт'],
+  },
+]
+
 function getIncidentOption(choice: string | null) {
   return incidentOptions.find(option => option.title === choice) ?? null
 }
@@ -135,6 +161,7 @@ function loadState(): SavedState {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (!raw) return defaultSaved
     const saved = { ...defaultSaved, ...JSON.parse(raw) } as SavedState
+    if (!saved.episodeStartedAt && saved.jobStartedAt) saved.episodeStartedAt = saved.jobStartedAt
     if (saved.incidentChoice === 'Позвать инженера') {
       return { ...saved, incidentChoice: 'Разобраться самому', incidentXpBonus: 4, incidentProgressBonus: 0, incidentKnowledge: 'Диагностика привода' }
     }
@@ -214,8 +241,10 @@ function App() {
 
   const job = jobs.find(item => item.id === state.jobId) ?? null
   const elapsed = state.jobStartedAt ? Math.max(0, Math.floor((now - state.jobStartedAt) / 1000)) : 0
-  const jobProgress = job ? Math.min(job.target, Math.floor(elapsed / 60) + state.incidentProgressBonus) : 0
-  const operationProgress = job ? Math.min(25, Math.round(jobProgress / job.target * 25)) : 0
+  const episodeElapsed = state.episodeStartedAt ? Math.max(0, Math.floor((now - state.episodeStartedAt) / 1000)) : 0
+  const episodeWorkUnits = job ? Math.min(EPISODE_WORK_UNITS, Math.floor(episodeElapsed / 60) + state.incidentProgressBonus) : 0
+  const jobProgress = job ? episodeWorkUnits === EPISODE_WORK_UNITS ? job.target : episodeWorkUnits === 0 ? 0 : (episodeWorkUnits - 1) % ORDER_WORK_UNITS + 1 : 0
+  const operationProgress = Math.round(episodeWorkUnits / EPISODE_WORK_UNITS * 100)
 
   const navigate = (screen: Screen) => {
     haptic('selection')
@@ -240,7 +269,15 @@ function App() {
   const beginJob = (selected: Job) => {
     haptic('success')
     const startedAt = Date.now()
-    setState(prev => ({ ...prev, department: selected.department, jobId: selected.id, jobStartedAt: startedAt, incidentAvailableAt: startedAt + FIRST_INCIDENT_DELAY_MS, incidentCreatedAt: null, incidentResolvedAt: null, incidentResolved: false, incidentChoice: null, incidentProgressBonus: 0, incidentXpBonus: 0, incidentKnowledge: null, screen: 'journal' }))
+    setState(prev => ({
+      ...prev,
+      department: selected.department,
+      jobId: selected.id,
+      jobStartedAt: startedAt,
+      episodeStartedAt: prev.episodeStartedAt ?? startedAt,
+      incidentAvailableAt: prev.incidentAvailableAt ?? startedAt + FIRST_INCIDENT_DELAY_MS,
+      screen: 'journal',
+    }))
   }
 
   if (state.screen === 'onboarding') return <Onboarding name={nameDraft} setName={setNameDraft} submit={createCharacter} />
@@ -268,8 +305,8 @@ function App() {
           {state.screen === 'skills' && <Skills state={state} elapsed={elapsed} />}
           {state.screen === 'map' && <DepartmentMap state={state} setState={setState} navigate={navigate} />}
           {state.screen === 'terminal' && <NewsTerminal navigate={navigate} openProductionJobs={() => setState(prev => ({ ...prev, department: 'mechanics', screen: 'jobs' }))} />}
-          {state.screen === 'chronicle' && <Chronicle state={state} job={job} progress={jobProgress} operationProgress={operationProgress} navigate={navigate} />}
-          {state.screen === 'objectives' && <Objectives state={state} job={job} progress={jobProgress} operationProgress={operationProgress} setState={setState} navigate={navigate} />}
+          {state.screen === 'chronicle' && <Chronicle state={state} job={job} progress={jobProgress} episodeWorkUnits={episodeWorkUnits} operationProgress={operationProgress} navigate={navigate} />}
+          {state.screen === 'objectives' && <Objectives state={state} job={job} progress={jobProgress} episodeWorkUnits={episodeWorkUnits} operationProgress={operationProgress} setState={setState} navigate={navigate} />}
         </section>
         <BottomNav current={state.screen} navigate={navigate} />
       </main>
@@ -455,35 +492,68 @@ function Floor({ state, setState, job, progress, operationProgress, navigate }: 
   )
 }
 
-function Objectives({ state, job, progress, operationProgress, setState, navigate }: { state: SavedState, job: Job | null, progress: number, operationProgress: number, setState: React.Dispatch<React.SetStateAction<SavedState>>, navigate: (s: Screen) => void }) {
-  const goToDepartment = (department: Department) => {
-    haptic('selection')
-    setState(prev => ({ ...prev, department, screen: 'jobs' }))
-  }
-  const urgent = Boolean(job && state.incidentCreatedAt && !state.incidentResolved)
+function Objectives({ state, job, progress, episodeWorkUnits, operationProgress, setState, navigate }: { state: SavedState, job: Job | null, progress: number, episodeWorkUnits: number, operationProgress: number, setState: React.Dispatch<React.SetStateAction<SavedState>>, navigate: (s: Screen) => void }) {
+  const activeMissionIndex = Math.min(episodeMissions.length - 1, Math.floor(episodeWorkUnits / MISSION_WORK_UNITS))
+  const activePackageIndex = Math.min(3, Math.floor((episodeWorkUnits % MISSION_WORK_UNITS) / PACKAGE_WORK_UNITS))
+  const [expandedMission, setExpandedMission] = useState(activeMissionIndex)
+  useEffect(() => setExpandedMission(activeMissionIndex), [activeMissionIndex])
+  const activeMission = episodeMissions[activeMissionIndex]
+  const activePackage = activeMission.packages[activePackageIndex]
+  const remainingUnits = Math.max(0, EPISODE_WORK_UNITS - episodeWorkUnits)
+  const episodeComplete = episodeWorkUnits >= EPISODE_WORK_UNITS
+  const segmentProgress = (start: number, size: number) => Math.max(0, Math.min(100, Math.round((episodeWorkUnits - start) / size * 100)))
+  const currentOrder = episodeComplete ? 6 : Math.floor((episodeWorkUnits % PACKAGE_WORK_UNITS) / ORDER_WORK_UNITS) + 1
 
-  const stages = [
-    { id: '01', title: 'Получить назначение', dept: 'Ярус 47', detail: job ? `Вы начали наряд «${job.title}».` : 'Выберите рабочее место и возьмите первый доступный наряд.', status: job ? 'done' : 'active', progress: job ? 100 : 0, action: () => job ? navigate('journal') : goToDepartment('mechanics') },
-    { id: '02', title: 'Подготовить компоненты', dept: 'Производство', detail: 'Нужно изготовить 18 заготовок, затем 8 подшипников и 6 креплений.', status: job?.department === 'mechanics' ? 'active' : 'available', progress: job?.department === 'mechanics' ? Math.round(progress / job.target * 100) : 0, action: () => goToDepartment('mechanics') },
-    { id: '03', title: 'Восстановить питание', dept: 'Энергетика', detail: 'Проверить силовой щит и накопить энергию для запуска привода.', status: job?.department === 'power' ? 'active' : 'available', progress: job?.department === 'power' ? Math.round(progress / job.target * 100) : 0, action: () => goToDepartment('power') },
-    { id: '04', title: 'Восстановить привод', dept: 'Инженерия', detail: 'Откроется после поставки подшипников и восстановления силовой линии.', status: 'locked', progress: 0, action: () => undefined },
+  const levels = [
+    { label: 'МАЛОЕ ЗАДАНИЕ', title: job ? job.title : 'Получить первый наряд', value: job ? Math.round(progress / job.target * 100) : 0, meta: '1 действие в минуту' },
+    { label: 'СРЕДНИЙ ЭТАП', title: episodeComplete ? 'Все этапы завершены' : activePackage, value: episodeComplete ? 100 : segmentProgress(activeMissionIndex * MISSION_WORK_UNITS + activePackageIndex * PACKAGE_WORK_UNITS, PACKAGE_WORK_UNITS), meta: `${currentOrder} из 6 нарядов` },
+    { label: 'БОЛЬШАЯ МИССИЯ', title: episodeComplete ? episodeMissions[2].title : activeMission.title, value: episodeComplete ? 100 : segmentProgress(activeMissionIndex * MISSION_WORK_UNITS, MISSION_WORK_UNITS), meta: episodeComplete ? '4 из 4 этапов' : `${activePackageIndex + 1} из 4 этапов` },
+    { label: 'ЭПИЗОД', title: 'Немой лифт', value: operationProgress, meta: episodeComplete ? 'сюжет завершён' : `осталось ≈ ${formatLongDuration(remainingUnits * 60)}` },
   ]
 
   return <div className="content-screen objectives-screen">
     <button className="back-button" onClick={() => navigate('floor')}><ArrowLeft size={17} /> НА ЭТАЖ</button>
-    <div className="screen-heading compact"><div><span className="eyebrow"><span /> ЭПИЗОД 01 · ОБЩАЯ ЦЕЛЬ</span><h1>План операции</h1><p>Восстановить грузовой лифт яруса 47 совместными усилиями трёх отсеков.</p></div><div className="objective-total"><span>ОБЩИЙ ПРОГРЕСС</span><b>{operationProgress}%</b><div><i style={{ width: `${operationProgress}%` }} /></div></div></div>
+    <div className="screen-heading compact"><div><span className="eyebrow"><span /> ЭПИЗОД 01 · 24 ЧАСА СОЛО</span><h1>План операции</h1><p>Минута работы закрывает действие. 20 действий образуют наряд, 6 нарядов — этап, 4 этапа — миссию.</p></div><div className="objective-total"><span>{episodeComplete ? 'ЭПИЗОД ЗАВЕРШЁН' : 'ОБЩИЙ ПРОГРЕСС'}</span><b>{operationProgress}%</b><div><i style={{ width: `${operationProgress}%` }} /></div></div></div>
 
     <CurrentDirective state={state} job={job} progress={progress} setState={setState} navigate={navigate} />
 
-    <div className="objective-list">
-      {stages.map(stage => <article className={`objective-card ${stage.status}`} key={stage.id}>
-        <div className="objective-index">{stage.status === 'done' ? <Check size={18} /> : stage.id}</div>
-        <div className="objective-body"><div className="objective-title"><span>{stage.dept}</span><em>{stage.status === 'done' ? 'ЗАВЕРШЕНО' : stage.status === 'active' ? 'ВЫ РАБОТАЕТЕ' : stage.status === 'locked' ? 'ЗАБЛОКИРОВАНО' : 'ДОСТУПНО'}</em></div><h2>{stage.title}</h2><p>{stage.detail}</p><div className="objective-progress"><i style={{ width: `${stage.progress}%` }} /></div><small>{stage.progress}%</small></div>
-        {stage.status !== 'locked' && <button onClick={stage.action}>{stage.status === 'done' ? 'РЕЗУЛЬТАТ' : 'ПЕРЕЙТИ'} <ChevronRight size={17} /></button>}
-      </article>)}
+    <section className="progress-hierarchy">
+      {levels.map((level, index) => <article key={level.label} className={index === 3 && episodeComplete ? 'complete' : ''}><span>{String(index + 1).padStart(2, '0')}</span><div><small>{level.label}</small><b>{level.title}</b><em>{level.meta}</em><div><i style={{ width: `${level.value}%` }} /></div></div><strong>{level.value}%</strong></article>)}
+    </section>
+
+    <div className="mission-tree">
+      {episodeMissions.map((mission, missionIndex) => {
+        const missionStart = missionIndex * MISSION_WORK_UNITS
+        const missionProgress = segmentProgress(missionStart, MISSION_WORK_UNITS)
+        const status = missionProgress >= 100 ? 'done' : episodeWorkUnits >= missionStart && episodeWorkUnits < missionStart + MISSION_WORK_UNITS && job ? 'active' : 'locked'
+        const expanded = expandedMission === missionIndex
+        return <section className={`mission-card ${status}`} key={mission.code}>
+          <button className="mission-header" onClick={() => setExpandedMission(expanded ? -1 : missionIndex)} aria-expanded={expanded}>
+            <span className="mission-code">{status === 'done' ? <Check size={18} /> : mission.code}</span>
+            <span><small>{status === 'done' ? 'МИССИЯ ЗАВЕРШЕНА' : status === 'active' ? 'ТЕКУЩАЯ МИССИЯ' : 'ОТКРОЕТСЯ ПОСЛЕ ПРЕДЫДУЩЕЙ'}</small><b>{mission.title}</b><em>{mission.story}</em></span>
+            <strong>{missionProgress}%</strong><ChevronRight size={19} />
+          </button>
+          {expanded && <div className="package-list">{mission.packages.map((packageTitle, packageIndex) => {
+            const packageStart = missionStart + packageIndex * PACKAGE_WORK_UNITS
+            const packageProgress = segmentProgress(packageStart, PACKAGE_WORK_UNITS)
+            const packageStatus = packageProgress >= 100 ? 'done' : packageProgress > 0 || (episodeWorkUnits === packageStart && job) ? 'active' : 'locked'
+            return <article className={`package-card ${packageStatus}`} key={packageTitle}>
+              <div className="package-heading"><span>{packageStatus === 'done' ? <Check size={15} /> : `${missionIndex + 1}.${packageIndex + 1}`}</span><div><small>ПРОИЗВОДСТВЕННЫЙ ЭТАП · 2 ЧАСА</small><b>{packageTitle}</b></div><strong>{packageProgress}%</strong></div>
+              <div className="order-chain">{Array.from({ length: 6 }, (_, orderIndex) => {
+                const orderStart = packageStart + orderIndex * ORDER_WORK_UNITS
+                const orderStatus = episodeWorkUnits >= orderStart + ORDER_WORK_UNITS ? 'done' : episodeWorkUnits >= orderStart && episodeWorkUnits < orderStart + ORDER_WORK_UNITS && job ? 'active' : 'locked'
+                return <span className={orderStatus} key={orderIndex}>{orderStatus === 'done' ? <Check size={12} /> : String(orderIndex + 1).padStart(2, '0')}</span>
+              })}</div>
+              <div className="package-progress"><i style={{ width: `${packageProgress}%` }} /></div>
+            </article>
+          })}</div>}
+        </section>
+      })}
     </div>
 
-    <aside className="objective-hint"><Info size={19} /><div><b>Можно менять отсек и работу в любой момент.</b><p>Уже изготовленные ресурсы, опыт и принятые решения сохраняются. Заблокированные этапы откроются автоматически после выполнения зависимостей.</p></div></aside>
+    {episodeComplete && <section className="episode-finale"><Check size={34} /><div><span>ЭПИЗОД 01 ЗАКРЫТ</span><h2>Грузовой лифт снова работает</h2><p>Ярус 47 восстановил снабжение верхних секторов. Ваши решения и освоенные знания сохранены в летописи.</p></div><button onClick={() => navigate('chronicle')}>ОТКРЫТЬ ЛЕТОПИСЬ <ChevronRight size={17} /></button></section>}
+
+    <aside className="objective-hint"><Info size={19} /><div><b>Прогресс продолжается после выхода.</b><p>Смена отсека или наряда не сбрасывает этап, миссию и Эпизод. Полное одиночное прохождение занимает около 24 часов активной смены.</p></div></aside>
   </div>
 }
 
@@ -594,7 +664,7 @@ function Skills({ state, elapsed }: { state: SavedState, elapsed: number }) {
     { name: 'Энергетика', level: 1, xp: xpFor('power'), max: 60, icon: Zap, color: 'yellow', note: 'Силовые линии и накопители' },
     { name: 'Ремонт', level: 1, xp: xpFor('repair'), max: 60, icon: Wrench, color: 'blue', note: 'Диагностика и восстановление' },
   ]
-  return <div className="content-screen skills-screen"><div className="screen-heading compact"><div><span className="eyebrow"><span /> ПРОФИЛЬ РАБОТНИКА</span><h1>Навыки</h1><p>{state.name} · прогресс текущего Эпизода</p></div><div className="episode-reset"><Info size={18} /><span><b>Прогресс Эпизода</b><small>Сбросится после финала</small></span></div></div><div className="skill-grid">{skillData.map(({ name, level, xp, max, icon: Icon, color, note }) => <article className="skill-card" key={name}><div className={`skill-symbol ${color}`}><Icon /></div><div className="skill-main"><span className="skill-level">УРОВЕНЬ {level}</span><h3>{name}</h3><p>{note}</p><div className="skill-bar"><i style={{ width: `${Math.min(100, xp / max * 100)}%` }} /></div><small>{xp} / {max} XP до следующего уровня</small></div></article>)}</div><section className="knowledge"><div className="section-kicker">ОСОБЫЕ ЗНАНИЯ <span>{state.incidentKnowledge ? '1 ОТКРЫТО' : 'ПОКА НЕТ'}</span></div>{state.incidentKnowledge ? <div className="knowledge-grid"><article><Sparkles /><div><b>{state.incidentKnowledge}</b><p>Получено после самостоятельного решения происшествия.</p><span>ПРОИСШЕСТВИЕ P-01</span></div></article></div> : <div className="knowledge-empty"><Sparkles /><p>Особые знания открываются, если выбранный исход прямо указывает такую награду.</p></div>}</section></div>
+  return <div className="content-screen skills-screen"><div className="screen-heading compact"><div><span className="eyebrow"><span /> ПРОФИЛЬ РАБОТНИКА</span><h1>Навыки</h1><p>{state.name} · прогресс текущего Эпизода</p></div><div className="episode-reset"><Info size={18} /><span><b>Прогресс Эпизода</b><small>Сохранится до следующего Эпизода</small></span></div></div><div className="skill-grid">{skillData.map(({ name, level, xp, max, icon: Icon, color, note }) => <article className="skill-card" key={name}><div className={`skill-symbol ${color}`}><Icon /></div><div className="skill-main"><span className="skill-level">УРОВЕНЬ {level}</span><h3>{name}</h3><p>{note}</p><div className="skill-bar"><i style={{ width: `${Math.min(100, xp / max * 100)}%` }} /></div><small>{xp} / {max} XP до следующего уровня</small></div></article>)}</div><section className="knowledge"><div className="section-kicker">ОСОБЫЕ ЗНАНИЯ <span>{state.incidentKnowledge ? '1 ОТКРЫТО' : 'ПОКА НЕТ'}</span></div>{state.incidentKnowledge ? <div className="knowledge-grid"><article><Sparkles /><div><b>{state.incidentKnowledge}</b><p>Получено после самостоятельного решения происшествия.</p><span>ПРОИСШЕСТВИЕ P-01</span></div></article></div> : <div className="knowledge-empty"><Sparkles /><p>Особые знания открываются, если выбранный исход прямо указывает такую награду.</p></div>}</section></div>
 }
 
 function DepartmentMap({ state, setState, navigate }: { state: SavedState, setState: React.Dispatch<React.SetStateAction<SavedState>>, navigate: (s: Screen) => void }) {
@@ -606,8 +676,15 @@ function NewsTerminal({ navigate, openProductionJobs }: { navigate: (s: Screen) 
   return <div className="content-screen terminal-page"><button className="back-button" onClick={() => navigate('floor')}><ArrowLeft size={17} /> К СХЕМЕ ЭТАЖА</button><div className="screen-heading compact"><div><span className="eyebrow"><span /> ИНФО-ТЕРМИНАЛ · ЯРУС 47</span><h1>Новости яруса</h1><p>Запросы отсеков и подтверждённые изменения операции — от ранних к поздним.</p></div><div className="terminal-live"><i /> СЕТЬ АКТИВНА</div></div><div className="news-list">{chronologicalNews.map(item => <article className={item.critical ? 'critical' : ''} key={item.time}><time>{item.time}</time><div className="news-line"><span>{item.category}</span><i /></div><div><h3>{item.title}</h3><p>{item.body}</p>{item.critical && <button onClick={openProductionJobs}>ПЕРЕЙТИ К НАРЯДУ <ChevronRight size={15} /></button>}</div></article>)}</div><div className="terminal-footer"><Radio size={17} /> ПОКАЗАНЫ СООБЩЕНИЯ ТЕКУЩЕГО ЭПИЗОДА</div></div>
 }
 
-function Chronicle({ state, job, progress, operationProgress, navigate }: { state: SavedState, job: Job | null, progress: number, operationProgress: number, navigate: (s: Screen) => void }) {
+function Chronicle({ state, job, progress, episodeWorkUnits, operationProgress, navigate }: { state: SavedState, job: Job | null, progress: number, episodeWorkUnits: number, operationProgress: number, navigate: (s: Screen) => void }) {
   const [tab, setTab] = useState<'episode' | 'personal' | 'participants'>('episode')
+  const chronicleTime = (workUnits: number) => new Date((state.episodeStartedAt ?? Date.now()) + workUnits * 60_000).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
+  const storyEvents = [
+    { threshold: 0, title: 'Операция началась', text: 'Получен первый наряд. Ярус 47 приступил к восстановлению лифта.', icon: Target },
+    { threshold: MISSION_WORK_UNITS, title: 'Причина остановки найдена', text: episodeMissions[0].story, icon: Wrench },
+    { threshold: MISSION_WORK_UNITS * 2, title: 'Восстановление подготовлено', text: episodeMissions[1].story, icon: Cog },
+    { threshold: EPISODE_WORK_UNITS, title: 'Грузовой лифт запущен', text: episodeMissions[2].story, icon: Zap },
+  ].filter(event => job && episodeWorkUnits >= event.threshold)
   const participants = [
     { name: state.name, department: job ? departments[job.department].label : 'Без назначения', contribution: progress, self: true },
     { name: 'Марина К.', department: 'Инженерия', contribution: 6 },
@@ -617,13 +694,13 @@ function Chronicle({ state, job, progress, operationProgress, navigate }: { stat
 
   return <div className="content-screen chronicle-screen">
     <button className="back-button" onClick={() => navigate('floor')}><ArrowLeft size={17} /> НАЗАД</button>
-    <div className="chronicle-hero"><span className="eyebrow"><span /> ЛЕТОПИСЬ · ЭПИЗОД 01</span><h1>Немой лифт</h1><p>Ярус 47 снова слышит движение тросов. Операция продолжается — эта запись показывает возможный итог общего труда.</p><div className="chronicle-status"><i /> ОПЕРАЦИЯ В ПРОЦЕССЕ · {operationProgress}%</div></div>
+    <div className="chronicle-hero"><span className="eyebrow"><span /> ЛЕТОПИСЬ · ЭПИЗОД 01</span><h1>Немой лифт</h1><p>{episodeWorkUnits >= EPISODE_WORK_UNITS ? 'Грузовой лифт снова работает. Снабжение верхних секторов восстановлено, Эпизод 01 завершён.' : 'Летопись пополняется после каждой большой миссии и фиксирует изменения сюжета.'}</p><div className="chronicle-status"><i /> {episodeWorkUnits >= EPISODE_WORK_UNITS ? 'ЭПИЗОД ЗАВЕРШЁН' : `ОПЕРАЦИЯ В ПРОЦЕССЕ · ${operationProgress}%`}</div></div>
     <div className="chronicle-tabs" role="tablist" aria-label="Разделы летописи">
       <button className={tab === 'episode' ? 'active' : ''} onClick={() => setTab('episode')} role="tab" aria-selected={tab === 'episode'}>ЭПИЗОД</button>
       <button className={tab === 'personal' ? 'active' : ''} onClick={() => setTab('personal')} role="tab" aria-selected={tab === 'personal'}>ЛИЧНАЯ ИСТОРИЯ</button>
       <button className={tab === 'participants' ? 'active' : ''} onClick={() => setTab('participants')} role="tab" aria-selected={tab === 'participants'}>УЧАСТНИКИ <span>{participants.length}</span></button>
     </div>
-    {tab === 'episode' && <div className="chronicle-layout"><section><div className="section-kicker">КЛЮЧЕВЫЕ СОБЫТИЯ · ОТ РАННИХ К ПОЗДНИМ</div><div className="chronicle-events"><p><time>08:41</time><Wrench /><span><b>Шахта обследована</b>Причина остановки лифта найдена.</span></p><p><time>09:17</time><Users /><span><b>Энергетика восстановила резерв</b>Линия получила стабильное питание.</span></p><p><time>10:24</time><Zap /><span><b>Заказ на подшипники открыт</b>Инженеры подтвердили износ привода.</span></p></div></section><aside className="personal-contribution"><span className="rail-label">ВАШ ВКЛАД</span><div className="contribution-avatar">{state.name.slice(0, 1).toUpperCase()}</div><h3>{state.name}</h3><p>{job ? `Работает в отсеке «${departments[job.department].label}» и выполняет наряд «${job.title}».` : 'Смена ещё не началась. Первая запись появится после получения рабочего наряда.'}</p><div><span><b>{progress}</b> единиц</span><span><b>{state.incidentResolved ? 1 : 0}</b> решений</span><span><b>1 ур.</b> навык</span></div></aside></div>}
+    {tab === 'episode' && <div className="chronicle-layout"><section><div className="section-kicker">СЮЖЕТНЫЕ СОБЫТИЯ · ОТ РАННИХ К ПОЗДНИМ</div>{storyEvents.length > 0 ? <div className="chronicle-events">{storyEvents.map(({ threshold, title, text, icon: Icon }) => <p key={threshold}><time>{chronicleTime(threshold)}</time><Icon /><span><b>{title}</b>{text}</span></p>)}</div> : <div className="chronicle-empty"><BookOpen /><p>Летопись начнётся после получения первого наряда.</p></div>}</section><aside className="personal-contribution"><span className="rail-label">ВАШ ВКЛАД</span><div className="contribution-avatar">{state.name.slice(0, 1).toUpperCase()}</div><h3>{state.name}</h3><p>{job ? `Работает в отсеке «${departments[job.department].label}» и выполняет наряд «${job.title}».` : 'Смена ещё не началась. Первая запись появится после получения рабочего наряда.'}</p><div><span><b>{episodeWorkUnits}</b> действий</span><span><b>{state.incidentResolved ? 1 : 0}</b> решений</span><span><b>{Math.min(3, Math.floor(episodeWorkUnits / MISSION_WORK_UNITS))}</b> миссий</span></div></aside></div>}
     {tab === 'personal' && <section className="personal-story-panel"><span className="rail-label">ЛИЧНАЯ ИСТОРИЯ</span><div className="contribution-avatar">{state.name.slice(0, 1).toUpperCase()}</div><div><h2>{state.name}</h2><p>{job ? `Смена начата в отсеке «${departments[job.department].label}». Текущий наряд: «${job.title}».` : 'Смена ещё не началась. Возьмите первый наряд, чтобы личная история начала пополняться.'}</p><div className="personal-story-stats"><span><b>{progress}</b> выполнено</span><span><b>{state.incidentResolved ? 1 : 0}</b> решений</span><span><b>{job ? 'В работе' : 'Ожидает'}</b> статус</span></div></div></section>}
     {tab === 'participants' && <section className="participants-panel"><div className="section-kicker">УЧАСТНИКИ ОПЕРАЦИИ <span>{participants.length}</span></div><div className="participants-grid">{participants.map(participant => <article key={participant.name} className={participant.self ? 'self' : ''}><div>{participant.name.slice(0, 1).toUpperCase()}</div><span><b>{participant.name} {participant.self && <em>ВЫ</em>}</b><small>{participant.department}</small></span><strong>{participant.contribution}</strong></article>)}</div></section>}
   </div>
@@ -638,6 +715,13 @@ function formatDuration(seconds: number) {
   const minutes = Math.floor(seconds / 60)
   const secs = seconds % 60
   return `${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`
+}
+
+function formatLongDuration(seconds: number) {
+  const totalMinutes = Math.ceil(seconds / 60)
+  const hours = Math.floor(totalMinutes / 60)
+  const minutes = totalMinutes % 60
+  return hours > 0 ? `${hours} ч ${minutes} мин` : `${minutes} мин`
 }
 
 export default App
