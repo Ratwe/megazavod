@@ -7,7 +7,7 @@ import {
 } from 'lucide-react'
 import { getTelegramUserName, getTelegramWebApp, haptic } from './telegram'
 
-type Screen = 'onboarding' | 'briefing' | 'floor' | 'journal' | 'skills' | 'map' | 'jobs' | 'incident' | 'chronicle' | 'terminal' | 'objectives'
+type Screen = 'lore' | 'onboarding' | 'briefing' | 'floor' | 'journal' | 'skills' | 'map' | 'jobs' | 'incident' | 'chronicle' | 'terminal' | 'objectives'
 type Department = 'mechanics' | 'power' | 'repair'
 
 type Job = {
@@ -56,7 +56,7 @@ const departments = {
 }
 
 const defaultSaved: SavedState = {
-  name: '', screen: 'onboarding', department: 'mechanics', jobId: null,
+  name: '', screen: 'lore', department: 'mechanics', jobId: null,
   jobStartedAt: null, episodeStartedAt: null, incidentAvailableAt: null, incidentCreatedAt: null, incidentResolvedAt: null, incidentResolved: false, incidentChoice: null,
   incidentProgressBonus: 0, incidentXpBonus: 0, incidentKnowledge: null,
 }
@@ -200,7 +200,7 @@ function App() {
     if (!telegram) return
 
     const backTargets: Partial<Record<Screen, Screen>> = {
-      briefing: 'onboarding', jobs: 'floor', journal: 'floor', skills: 'floor',
+      briefing: 'lore', onboarding: 'briefing', jobs: 'floor', journal: 'floor', skills: 'floor',
       map: 'floor', incident: 'journal', chronicle: 'floor', terminal: 'floor', objectives: 'floor',
     }
     const target = backTargets[state.screen]
@@ -263,7 +263,7 @@ function App() {
     const clean = nameDraft.trim().slice(0, 24)
     if (clean.length < 2) return
     haptic('success')
-    setState(prev => ({ ...prev, name: clean, screen: 'briefing' }))
+    setState(prev => ({ ...prev, name: clean, screen: 'floor' }))
   }
 
   const beginJob = (selected: Job) => {
@@ -280,8 +280,9 @@ function App() {
     }))
   }
 
+  if (state.screen === 'lore') return <LoreIntro continueIntro={() => setState(prev => ({ ...prev, screen: 'briefing' }))} />
+  if (state.screen === 'briefing') return <Briefing continueGame={() => setState(prev => ({ ...prev, screen: 'onboarding' }))} />
   if (state.screen === 'onboarding') return <Onboarding name={nameDraft} setName={setNameDraft} submit={createCharacter} />
-  if (state.screen === 'briefing') return <Briefing name={state.name} continueGame={() => navigate('floor')} />
 
   return (
     <div className="app-shell">
@@ -314,6 +315,58 @@ function App() {
   )
 }
 
+function LoreIntro({ continueIntro }: { continueIntro: () => void }) {
+  const [slide, setSlide] = useState(0)
+  const scenes = [
+    {
+      code: 'ПРОЛОГ · 01',
+      title: 'Мир внутри машины',
+      text: 'Никто на нижних ярусах не знает, где заканчивается комплекс. Для миллионов людей гул механизмов заменил погоду, смены стали календарём, а остановка производства — самой понятной формой катастрофы.',
+      note: 'Снаружи нет подтверждённых данных. Внутри работа продолжается.',
+      Icon: Factory,
+      figure: '∞',
+    },
+    {
+      code: 'ПРОЛОГ · 02',
+      title: 'Мегазавод живёт',
+      text: 'Ярусы зависят друг от друга. Энергетики питают линии, производство выпускает детали, инженеры удерживают древние системы в рабочем состоянии. Ни один отсек не способен выжить отдельно.',
+      note: 'Каждая исправная машина поддерживает жизнь далеко за пределами своего цеха.',
+      Icon: Cog,
+      figure: '47',
+    },
+    {
+      code: 'ПРОЛОГ · 03',
+      title: 'Завод помнит решения',
+      text: 'Здесь нет избранных героев. История складывается из нарядов, происшествий и решений обычных работников. Малые действия становятся этапами, этапы — миссиями, а миссии меняют судьбу целого яруса.',
+      note: 'Ваш дневник станет частью общей летописи.',
+      Icon: BookOpen,
+      figure: 'Z',
+    },
+  ]
+  const scene = scenes[slide]
+  const SceneIcon = scene.Icon
+  const next = () => slide < scenes.length - 1 ? setSlide(value => value + 1) : continueIntro()
+
+  return <main className={`lore-intro lore-intro-${slide + 1}`}>
+    <div className="lore-grid" aria-hidden="true" />
+    <header className="lore-header"><div className="brand-mini">Z</div><span>АРХИВ МЕГАЗАВОДА</span><b>{String(slide + 1).padStart(2, '0')} / {String(scenes.length).padStart(2, '0')}</b></header>
+    <div className="lore-figure" aria-hidden="true">{scene.figure}</div>
+    <section className="lore-panel">
+      <div className="lore-icon"><SceneIcon /></div>
+      <span className="eyebrow"><span /> {scene.code}</span>
+      <h1>{scene.title}</h1>
+      <p>{scene.text}</p>
+      <aside><Radio size={16} /><span>{scene.note}</span></aside>
+      <div className="lore-controls">
+        <button className="lore-back" onClick={() => setSlide(value => Math.max(0, value - 1))} disabled={slide === 0}><ArrowLeft size={17} /> НАЗАД</button>
+        <div className="lore-dots">{scenes.map((item, index) => <button key={item.code} className={index === slide ? 'active' : ''} onClick={() => setSlide(index)} aria-label={`Открыть часть ${index + 1}`} />)}</div>
+        <button className="primary-button" onClick={next}>{slide === scenes.length - 1 ? 'К ЭПИЗОДУ' : 'ДАЛЕЕ'} <ArrowRight size={18} /></button>
+      </div>
+    </section>
+    <footer className="lore-footer"><span>ВНУТРЕННЯЯ СЕТЬ // ДОСТУП К АРХИВУ</span><span>СИГНАЛ УСТОЙЧИВ</span></footer>
+  </main>
+}
+
 function Onboarding({ name, setName, submit }: { name: string, setName: (v: string) => void, submit: () => void }) {
   return (
     <main className="onboarding">
@@ -335,7 +388,7 @@ function Onboarding({ name, setName, submit }: { name: string, setName: (v: stri
           <input id="character-name" autoFocus maxLength={24} value={name} onChange={e => setName(e.target.value)} onKeyDown={e => e.key === 'Enter' && submit()} placeholder="Введите имя" />
           <span>{name.length}/24</span>
         </div>
-        <button className="primary-button" onClick={submit} disabled={name.trim().length < 2}>ПОЛУЧИТЬ ПРОПУСК <ArrowRight size={18} /></button>
+        <button className="primary-button" onClick={submit} disabled={name.trim().length < 2}>ВОЙТИ НА ЯРУС <ArrowRight size={18} /></button>
         <p className="microcopy"><ShieldAlert size={14} /> Данные персонажа сохраняются только на этом устройстве</p>
       </section>
       <div className="system-status"><span className="status-dot" /> СИСТЕМЫ ЯРУСА В СЕТИ <b>03:17:42</b></div>
@@ -343,35 +396,35 @@ function Onboarding({ name, setName, submit }: { name: string, setName: (v: stri
   )
 }
 
-function Briefing({ name, continueGame }: { name: string, continueGame: () => void }) {
+function Briefing({ continueGame }: { continueGame: () => void }) {
   return (
     <main className="briefing">
       <header className="briefing-header"><div className="brand-mini">Z</div><span>ОПЕРАТИВНЫЙ БРИФИНГ</span><span className="briefing-id">ЭПИЗОД 01 / ЯРУС 47</span></header>
       <div className="briefing-content">
         <section className="briefing-lead">
-          <div className="eyebrow"><span /> ДОБРО ПОЖАЛОВАТЬ, {name.toUpperCase()}</div>
+          <div className="eyebrow"><span /> ВХОДЯЩИЙ АВАРИЙНЫЙ СИГНАЛ</div>
           <p className="episode-code">ЭПИЗОД 01</p>
           <h1>НЕМОЙ<br />ЛИФТ</h1>
-          <p className="lead-text">Грузовой лифт яруса 47 не отвечает. Без него остановится снабжение верхних секторов.</p>
-          <div className="briefing-alert"><AlertTriangle size={20} /><div><b>Связь с диспетчером отсутствует</b><span>Причина отказа неизвестна</span></div></div>
+          <p className="lead-text">Три часа назад грузовой лифт яруса 47 остановился между секторами. Последний пакет телеметрии оборвался на полуслове. Без этой линии верхние ярусы останутся без деталей и энергии.</p>
+          <div className="briefing-alert"><AlertTriangle size={20} /><div><b>Диспетчер лифта не отвечает</b><span>Кабина пуста · причина остановки неизвестна</span></div></div>
         </section>
         <section className="operation-plan">
-          <div className="section-kicker">ПЛАН ОПЕРАЦИИ <span>3 ОСНОВНЫЕ ЗАДАЧИ</span></div>
+          <div className="section-kicker">ПЛАН ЭПИЗОДА <span>3 СЮЖЕТНЫЕ МИССИИ · ≈24 ЧАСА</span></div>
           {[
-            { num: '01', title: 'Обследовать механизм', dept: 'Инженерия', Icon: Wrench },
-            { num: '02', title: 'Подготовить компоненты', dept: 'Производство', Icon: Cog },
-            { num: '03', title: 'Восстановить питание', dept: 'Энергетика', Icon: Zap },
+            { num: '01', title: 'Найти причину остановки', dept: 'Диагностика · 8 часов', Icon: Wrench },
+            { num: '02', title: 'Подготовить восстановление', dept: 'Снабжение · 8 часов', Icon: Cog },
+            { num: '03', title: 'Вернуть лифт в строй', dept: 'Запуск · 8 часов', Icon: Zap },
           ].map(({ num, title, dept, Icon }) => (
             <div className="operation-step" key={num}>
               <span className="step-num">{num}</span><span className="step-icon"><Icon size={22} /></span>
               <div><b>{title}</b><span>{dept}</span></div><span className="step-status">ЭТАП</span>
             </div>
           ))}
-          <div className="collective-goal"><Users size={20} /><div><b>Это общая операция</b><span>Работа каждого приближает запуск лифта. Отсек можно сменить в любой момент.</span></div></div>
-          <button className="primary-button" onClick={continueGame}>ПЕРЕЙТИ НА ЯРУС <ArrowRight size={18} /></button>
+          <div className="collective-goal"><Users size={20} /><div><b>Ваши решения станут частью сюжета</b><span>Наряды объединяются в этапы и миссии. Итоги миссий меняют летопись и приводят к финалу Эпизода.</span></div></div>
+          <button className="primary-button" onClick={continueGame}>ПОЛУЧИТЬ ПРОПУСК <ArrowRight size={18} /></button>
         </section>
       </div>
-      <footer className="briefing-footer"><span>МЕГАЗАВОД // ВНУТРЕННЯЯ СЕТЬ</span><span>ЦЕЛЬ НЕ ИМЕЕТ КАЛЕНДАРНОГО СРОКА</span></footer>
+      <footer className="briefing-footer"><span>МЕГАЗАВОД // ВНУТРЕННЯЯ СЕТЬ</span><span>СОЛО-ПРОХОЖДЕНИЕ: ОКОЛО 24 ЧАСОВ</span></footer>
     </main>
   )
 }
