@@ -225,6 +225,41 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--orange); ou
 .episode-finale button { min-height: 42px; padding: 0 13px; display: flex; align-items: center; gap: 8px; color: #07130e; border: 0; background: var(--green); cursor: pointer; font-size: 9px; font-weight: 700; }
 
 .floor-layout { display: grid; grid-template-columns: minmax(500px, 1fr) 260px; gap: 18px; }
+.location-breadcrumb { margin: -4px 0 16px; display: flex; align-items: center; flex-wrap: wrap; gap: 5px; }
+.location-breadcrumb span { display: flex; align-items: center; gap: 5px; color: #526168; }
+.location-breadcrumb button { padding: 3px 0; border: 0; background: transparent; color: #74838a; cursor: pointer; font: 8px 'IBM Plex Mono', monospace; letter-spacing: .06em; text-transform: uppercase; }
+.location-breadcrumb button:hover, .location-breadcrumb button.active { color: var(--orange-2); }
+.location-stage { min-height: 610px; padding: 70px 30px 30px; position: relative; overflow: hidden; border: 1px solid #334047; background: radial-gradient(circle at 50% 45%, #18262c 0%, #0c1316 42%, #06090b 80%); box-shadow: inset 0 0 80px #000a; }
+.location-stage::after { content: ''; position: absolute; inset: 0; pointer-events: none; background: repeating-linear-gradient(95deg, transparent 0 90px, rgba(255,255,255,.018) 91px 92px), linear-gradient(180deg, transparent 50%, #000b); }
+.location-stage > .scene-grid, .location-stage > .pipe { pointer-events: none; }
+.location-intro { max-width: 650px; margin-bottom: 27px; position: relative; z-index: 2; }
+.location-intro > span { color: var(--orange-2); font: 8px 'IBM Plex Mono', monospace; letter-spacing: .12em; }
+.location-intro h2 { margin: 7px 0 5px; font-size: 27px; text-transform: uppercase; }
+.location-intro p { max-width: 620px; margin: 0; color: #8e9ba0; font-size: 12px; line-height: 1.55; }
+.location-grid { position: relative; z-index: 3; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.location-grid.hub-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.location-card { min-height: 132px; padding: 15px; display: grid; grid-template-columns: 42px minmax(0, 1fr) auto; align-items: center; gap: 11px; position: relative; overflow: hidden; text-align: left; border: 1px solid #35444a; background: linear-gradient(135deg, #11191d, #090e10); cursor: pointer; }
+.location-card::after { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 2px; background: #435158; }
+.location-card:hover { border-color: #a75328; transform: translateY(-2px); }
+.location-card.route { border-color: #8a4928; background: linear-gradient(135deg, #21140f, #0c1113 65%); }
+.location-card.route::after { background: var(--orange); box-shadow: 0 0 14px var(--orange); }
+.location-card-icon { width: 42px; height: 50px; display: grid; place-items: center; color: var(--orange-2); border: 1px solid #57301d; background: #1c120e; }
+.location-card-copy { min-width: 0; display: flex; flex-direction: column; }
+.location-card-copy small { color: #738087; font: 7px 'IBM Plex Mono', monospace; letter-spacing: .08em; }
+.location-card-copy b { margin: 5px 0 3px; color: #e6e9e8; font-size: 14px; text-transform: uppercase; }
+.location-card-copy em { color: #89959a; font-size: 9px; line-height: 1.35; font-style: normal; }
+.location-card > strong { position: absolute; left: 15px; bottom: 8px; display: flex; align-items: center; gap: 4px; color: var(--orange-2); font: 6px 'IBM Plex Mono', monospace; letter-spacing: .06em; }
+.location-card > svg { color: #66757c; }
+.location-room { display: flex; flex-direction: column; }
+.room-equipment { min-height: 350px; padding: 28px; position: relative; z-index: 3; display: grid; grid-template-columns: minmax(180px, 260px) minmax(0, 1fr); align-items: center; gap: 36px; border: 1px solid #35454c; background: linear-gradient(145deg, #11191d, #080c0e); }
+.room-equipment.route { border-color: #8f4b28; box-shadow: inset 3px 0 var(--orange); }
+.room-machine { min-height: 230px; position: relative; display: grid; place-items: center; color: #75868d; border: 1px solid #3b4b52; background: radial-gradient(circle, #23333a, #0b1114 68%); box-shadow: inset 0 0 40px #0009; }
+.room-machine svg { position: relative; z-index: 2; }
+.machine-glow { position: absolute; width: 80px; height: 80px; border-radius: 50%; background: #ff5a1818; box-shadow: 0 0 65px #ff5a1845; }
+.room-equipment small { color: var(--orange-2); font: 8px 'IBM Plex Mono', monospace; letter-spacing: .1em; }
+.room-equipment h3 { margin: 8px 0; font-size: 25px; text-transform: uppercase; }
+.room-equipment p { max-width: 430px; color: #909ca1; font-size: 12px; line-height: 1.55; }
+.room-equipment button { min-height: 46px; margin-top: 14px; padding: 0 15px; display: flex; align-items: center; justify-content: space-between; gap: 18px; border: 0; background: var(--orange); color: #160a05; cursor: pointer; font-size: 10px; font-weight: 700; }
 .floor-scene { min-height: 610px; position: relative; overflow: hidden; border: 1px solid #334047; background: radial-gradient(circle at 50% 45%, #18262c 0%, #0c1316 38%, #06090b 76%); box-shadow: inset 0 0 80px #000a; }
 .floor-scene::before, .floor-scene::after { content: ''; position: absolute; inset: 0; pointer-events: none; }
 .floor-scene::before { background: linear-gradient(90deg, transparent 8%, #0d171b 8% 9%, transparent 9% 48%, #0d171b 48% 50%, transparent 50% 90%, #0d171b 90% 92%, transparent 92%), linear-gradient(0deg, transparent 19%, #26343a 19% 20%, transparent 20% 48%, #1b282e 48% 49%, transparent 49% 80%, #26343a 80% 81%, transparent 81%); }
@@ -649,6 +684,18 @@ button.timeline-event { cursor: pointer; }
   .objective-card > button { grid-column: 1 / -1; min-height: 44px; justify-content: space-between; }
   .objective-body h2 { font-size: 16px; }
   .floor-layout { display: block; }
+  .location-breadcrumb { margin-top: 0; overflow-x: auto; flex-wrap: nowrap; scrollbar-width: none; }
+  .location-breadcrumb span { flex: 0 0 auto; }
+  .location-stage { min-height: 0; padding: 28px 14px 18px; }
+  .location-intro { margin-bottom: 20px; }
+  .location-intro h2 { font-size: 22px; }
+  .location-grid, .location-grid.hub-grid { grid-template-columns: 1fr; }
+  .location-card { min-height: 116px; }
+  .room-equipment { min-height: 0; padding: 15px; grid-template-columns: 1fr; gap: 18px; }
+  .room-machine { min-height: 170px; }
+  .room-equipment h3 { font-size: 21px; }
+  .room-equipment button { width: 100%; }
+  .directive-primary { white-space: normal; text-align: left; }
   .floor-scene { min-height: 500px; }
   .lathe { width: 49%; left: 5%; top: 31%; }
   .power-panel { width: 29%; right: 3%; top: 28%; }
