@@ -78,32 +78,26 @@ const incidentOptions = [
   {
     title: 'Проверить крепления',
     text: 'Остановить станок и устранить возможное ослабление.',
-    result: '+2 к прогрессу задачи · +1 XP',
     progressBonus: 2,
     xpBonus: 1,
     knowledge: null,
     icon: Wrench,
-    tag: 'БОЛЬШЕ ПРОГРЕССА',
   },
   {
     title: 'Снизить обороты',
     text: 'Продолжить работу в щадящем режиме без полной диагностики.',
-    result: '+1 к прогрессу задачи · +2 XP',
     progressBonus: 1,
     xpBonus: 2,
     knowledge: null,
     icon: Gauge,
-    tag: 'СБАЛАНСИРОВАННО',
   },
   {
     title: 'Разобраться самому',
     text: 'Самостоятельно исследовать причину вибрации вместо выпуска детали.',
-    result: '+4 XP · знание «Диагностика привода»',
     progressBonus: 0,
     xpBonus: 4,
     knowledge: 'Диагностика привода',
     icon: Target,
-    tag: 'БОЛЬШЕ ОПЫТА',
   },
 ]
 
@@ -777,7 +771,7 @@ function Journal({ state, job, progress, episodeWorkUnits, elapsed, navigate }: 
             }
             if (entry.kind === 'incident' && !state.incidentResolved) return <button className="timeline-event incident-entry" key={`incident-${entry.timestamp}`} onClick={() => navigate('incident')}><time>{time(entry.timestamp)}</time><span className="timeline-dot danger" /><div><span className="entry-type">АКТИВНОЕ ПРОИСШЕСТВИЕ</span><h3>Станок вибрирует</h3><p>Непонятный стук привода. Решение нужно принять в течение десяти минут.</p><b>ПРИНЯТЬ РЕШЕНИЕ <ChevronRight size={15} /></b></div></button>
             if (entry.kind === 'incident') return <div className="timeline-event incident-entry" key={`incident-${entry.timestamp}`}><time>{time(entry.timestamp)}</time><span className="timeline-dot danger" /><div><span className="entry-type">ПРОИСШЕСТВИЕ</span><h3>Станок вибрирует</h3><p>Привод издал неровный металлический стук. Потребовалось решение.</p></div></div>
-            return <div className="timeline-event resolved-entry" key={`resolution-${entry.timestamp}`}><time>{time(entry.timestamp)}</time><span className="timeline-dot success" /><div><span className="entry-type">РЕШЕНИЕ ЗАФИКСИРОВАНО</span><h3>{state.incidentChoice}</h3><p>{incidentOutcome?.text ?? 'Исход сохранён в журнале.'}</p>{incidentOutcome && <small>{incidentOutcome.result}</small>}</div></div>
+            return <div className="timeline-event resolved-entry" key={`resolution-${entry.timestamp}`}><time>{time(entry.timestamp)}</time><span className="timeline-dot success" /><div><span className="entry-type">РЕШЕНИЕ ЗАФИКСИРОВАНО</span><h3>{state.incidentChoice}</h3><p>{incidentOutcome?.text ?? 'Исход сохранён в журнале.'}</p></div></div>
           })}
         </div>
         <aside className="shift-summary"><span className="rail-label">СВОДКА СМЕНЫ</span><div className="summary-number"><b>{progress}</b><span>ЕДИНИЦ<br />ПРОИЗВЕДЕНО</span></div><div className="summary-stats"><p><span>Опыт</span><b>+{Math.floor(elapsed / 60) + state.incidentXpBonus} XP</b></p><p><span>Время</span><b>{formatDuration(elapsed)}</b></p><p><span>Происшествия</span><b>{state.incidentCreatedAt ? 1 : 0}</b></p></div><button onClick={() => navigate('floor')}>ВЕРНУТЬСЯ НА ЭТАЖ</button></aside>
@@ -794,15 +788,15 @@ function Incident({ state, setState, navigate, remaining }: { state: SavedState,
     setState(prev => ({ ...prev, incidentResolved: true, incidentResolvedAt: Date.now(), incidentChoice: selectedOption.title, incidentProgressBonus: selectedOption.progressBonus, incidentXpBonus: selectedOption.xpBonus, incidentKnowledge: selectedOption.knowledge, screen: 'journal' }))
   }
   const resolvedOption = getIncidentOption(state.incidentChoice)
-  if (state.incidentResolved) return <div className="content-screen resolved-screen"><Check size={44} /><span className="eyebrow"><span /> ИСХОД ЗАФИКСИРОВАН</span><h1>{state.incidentChoice}</h1><p>{resolvedOption?.text ?? 'Решение уже применено и останется в истории Эпизода.'}</p>{resolvedOption && <div className="resolved-reward">{resolvedOption.result}</div>}<button className="primary-button" onClick={() => navigate('journal')}>ВЕРНУТЬСЯ В ДНЕВНИК</button></div>
+  if (state.incidentResolved) return <div className="content-screen resolved-screen"><Check size={44} /><span className="eyebrow"><span /> ИСХОД ЗАФИКСИРОВАН</span><h1>{state.incidentChoice}</h1><p>{resolvedOption?.text ?? 'Решение уже применено и останется в истории Эпизода.'}</p><button className="primary-button" onClick={() => navigate('journal')}>ВЕРНУТЬСЯ В ДНЕВНИК</button></div>
   return (
     <div className="content-screen incident-screen">
       <button className="back-button" onClick={() => navigate('journal')}><ArrowLeft size={17} /> В ДНЕВНИК</button>
       <div className="incident-header"><div className="warning-sign"><AlertTriangle /></div><div><span>ПРОИСШЕСТВИЕ · ПРОИЗВОДСТВЕННЫЙ ОТСЕК</span><h1>Станок вибрирует</h1><p>Привод издаёт неровный металлический стук.</p></div><div className="countdown"><Clock3 size={19} /><span>ОСТАЛОСЬ</span><b>{formatDuration(remaining)}</b></div></div>
       <div className="incident-visual"><div className="machine-silhouette"><Cog /><span className="vibration v1" /><span className="vibration v2" /></div><div className="scan-lines" /><span>СТАНОК 03-А · АНОМАЛИЯ ПРИВОДА</span></div>
-      <div className="decision-copy"><span>ВАШЕ РЕШЕНИЕ</span><p>Выберите, что важнее сейчас: прогресс задачи, баланс или развитие навыка.</p></div>
-      <aside className="decision-mechanics"><Info size={17} /><span><b>Как это работает</b> Все варианты сразу закрывают происшествие. Указанная награда применяется один раз и появляется в дневнике и сводке смены.</span></aside>
-      <div className="decision-options">{incidentOptions.map(({ title, text, result, icon: Icon, tag }) => <button key={title} className={choice === title ? 'selected' : ''} onClick={() => setChoice(title)}><span className="decision-icon"><Icon /></span><span><b>{title}</b><small>{text}</small><strong>{result}</strong><em>{tag}</em></span><span className="radio-mark">{choice === title && <i />}</span></button>)}</div>
+      <div className="decision-copy"><span>ВАШЕ РЕШЕНИЕ</span><p>Выберите, как поступить. Последствия станут известны после подтверждения.</p></div>
+      <aside className="decision-mechanics"><Info size={17} /><span><b>Решение необратимо</b> Оно останется в дневнике и может отразиться в следующих страницах истории.</span></aside>
+      <div className="decision-options">{incidentOptions.map(({ title, text, icon: Icon }) => <button key={title} className={choice === title ? 'selected' : ''} onClick={() => setChoice(title)}><span className="decision-icon"><Icon /></span><span><b>{title}</b><small>{text}</small></span><span className="radio-mark">{choice === title && <i />}</span></button>)}</div>
       <button className="primary-button decision-confirm" disabled={!choice} onClick={confirm}>ПОДТВЕРДИТЬ РЕШЕНИЕ <ArrowRight size={18} /></button>
       <p className="fallback-note"><Info size={15} /> Если время истечёт, система автоматически выберет «Проверить крепления».</p>
     </div>
