@@ -6,6 +6,8 @@ import {
   Wrench, Zap,
 } from 'lucide-react'
 import { getTelegramUserName, getTelegramWebApp, haptic } from './telegram'
+import { useStory } from './story/useStory'
+import type { ChronicleEntry as StoryChronicleEntry, CouncilView, EpisodeSnapshot, PlayerView, RecapView, WorkView } from './story/domain'
 
 type Screen = 'lore' | 'onboarding' | 'briefing' | 'floor' | 'journal' | 'skills' | 'map' | 'jobs' | 'incident' | 'chronicle' | 'terminal' | 'objectives'
 type Department = 'mechanics' | 'power' | 'repair'
@@ -48,6 +50,7 @@ type IncidentDefinition = {
   weight: number
   departments?: Department[]
   missions?: number[]
+  timeoutOptionId: string
   responseSeconds: number
   options: IncidentOption[]
 }
@@ -68,6 +71,8 @@ type SavedState = {
   incidentProgressBonus: number
   incidentXpBonus: number
   incidentKnowledge: string[]
+  contributionCycle: number
+  storyMigrated: boolean
 }
 
 const jobs: Job[] = [
@@ -79,6 +84,14 @@ const jobs: Job[] = [
   { id: 'J_DIAG_REPAIR', title: 'Обследовать шахту', description: 'Определить состояние привода', department: 'repair', level: 1, reward: '+8 XP · диагностика', target: 20, output: 'Осмотр', icon: 'repair' },
   { id: 'J_REPAIR', title: 'Восстановить привод', description: 'Смонтировать исправный узел', department: 'repair', level: 2, reward: '+12 XP · ремонт', target: 20, output: 'Ремонт', icon: 'repair' },
 ]
+
+function workToJob(work: WorkView): Job {
+  return {
+    id: work.id, title: work.title, description: work.description, department: work.department,
+    level: work.skill.level, reward: '+1 XP за действие', target: work.requiredProgress,
+    output: work.nearestResult, icon: work.department === 'power' ? 'power' : work.department === 'repair' ? 'repair' : 'bearing',
+  }
+}
 
 const departments = {
   mechanics: { label: 'Производство', short: 'Мех. цех', icon: Factory, subtitle: 'Выпуск деталей и заготовок' },
@@ -103,16 +116,16 @@ type LocationDefinition = {
 const locations: Record<LocationId, LocationDefinition> = {
   'floor-hub': { id: 'floor-hub', parent: null, title: 'Центральный переход', code: 'ЯРУС 47 · УЗЕЛ 00', subtitle: 'Отсюда расходятся все маршруты этажа', detail: 'Широкий переход вокруг грузового лифта связывает три рабочих крыла, Архив и диспетчерскую.', icon: Map, children: ['production-wing', 'power-wing', 'engineering-wing', 'archive-room', 'dispatch-room', 'lift-hall'] },
   'production-wing': { id: 'production-wing', parent: 'floor-hub', title: 'Производственный цех', code: 'СЕКТОР 03-А', subtitle: 'Металл, станки и сборочные посты', detail: 'За шумозащитной дверью цех разделяется на подготовку заготовок, токарную комнату и участок сборки.', icon: Factory, department: 'mechanics', children: ['blank-room', 'lathe-room', 'assembly-room'] },
-  'blank-room': { id: 'blank-room', parent: 'production-wing', title: 'Заготовительная', code: 'КОМНАТА 03-А1', subtitle: 'Резка, очистка и первичная проверка металла', detail: 'Стеллажи с промаркированными слитками ведут к отрезному станку и столу входного контроля.', icon: Box, department: 'mechanics', jobIds: ['J_BLANK'] },
+  'blank-room': { id: 'blank-room', parent: 'production-wing', title: 'Заготовительная', code: 'КОМНАТА 03-А1', subtitle: 'Резка, очистка и первичная проверка металла', detail: 'Стеллажи с промаркированными слитками ведут к отрезному станку и столу входного контроля.', icon: Box, department: 'mechanics', jobIds: ['J_BLANK', 'alternate-supply'] },
   'lathe-room': { id: 'lathe-room', parent: 'production-wing', title: 'Токарная комната', code: 'КОМНАТА 03-А2', subtitle: 'Точная обработка деталей привода', detail: 'В центре стоит токарный станок 03-А2. Только здесь можно начать изготовление колец и подшипников.', icon: Cog, department: 'mechanics', jobIds: ['J_BEARING'] },
   'assembly-room': { id: 'assembly-room', parent: 'production-wing', title: 'Сборочная', code: 'КОМНАТА 03-А3', subtitle: 'Крепёж, посадка и контроль комплектов', detail: 'Длинный сборочный стол освещён контрольными лампами. На стене висят ключи с метками допуска.', icon: Wrench, department: 'mechanics', jobIds: ['J_FASTENER'] },
   'power-wing': { id: 'power-wing', parent: 'floor-hub', title: 'Энергетическое крыло', code: 'СЕКТОР 03-Б', subtitle: 'Распределение мощности и резерв', detail: 'За изолирующим шлюзом слышен гул шин. От коридора отходят щитовая, накопительная и релейная.', icon: Zap, department: 'power', children: ['switchboard-room', 'battery-room', 'relay-room'] },
-  'switchboard-room': { id: 'switchboard-room', parent: 'power-wing', title: 'Силовая щитовая', code: 'КОМНАТА 03-Б1', subtitle: 'Вводы, контакторы и журнал перегрузок', detail: 'Высокие шкафы закрывают стены. Индикаторы силового щита повторяют пульс линии грузового лифта.', icon: Zap, department: 'power', jobIds: ['J_DIAG_POWER'] },
+  'switchboard-room': { id: 'switchboard-room', parent: 'power-wing', title: 'Силовая щитовая', code: 'КОМНАТА 03-Б1', subtitle: 'Вводы, контакторы и журнал перегрузок', detail: 'Высокие шкафы закрывают стены. Индикаторы силового щита повторяют пульс линии грузового лифта.', icon: Zap, department: 'power', jobIds: ['J_DIAG_POWER', 'power-audit', 'controlled-test', 'bypass-interlock'] },
   'battery-room': { id: 'battery-room', parent: 'power-wing', title: 'Накопительная', code: 'КОМНАТА 03-Б2', subtitle: 'Буферные ячейки и резервный контур', detail: 'Ряды накопителей уходят в полумрак. Здесь собирают энергию для первого движения кабины.', icon: Gauge, department: 'power', jobIds: ['J_GENERATE'] },
-  'relay-room': { id: 'relay-room', parent: 'power-wing', title: 'Релейная', code: 'КОМНАТА 03-Б3', subtitle: 'Автоматика и сигнальные цепи', detail: 'Сотни реле щёлкают за стеклом. Терминал показывает необработанные сообщения силовой сети.', icon: Terminal, department: 'power', utility: 'terminal' },
+  'relay-room': { id: 'relay-room', parent: 'power-wing', title: 'Релейная', code: 'КОМНАТА 03-Б3', subtitle: 'Автоматика и сигнальные цепи', detail: 'Сотни реле щёлкают за стеклом. Терминал показывает необработанные сообщения силовой сети.', icon: Terminal, department: 'power', jobIds: ['recover-access-log', 'trace-override'], utility: 'terminal' },
   'engineering-wing': { id: 'engineering-wing', parent: 'floor-hub', title: 'Инженерное крыло', code: 'СЕКТОР 03-В', subtitle: 'Ремонт, диагностика и доступ к шахте', detail: 'Коридор заканчивается гермодверью шахты. По пути расположены ремонтный док и инструментальная.', icon: Wrench, department: 'repair', children: ['repair-bay', 'shaft-gallery', 'tool-room'] },
-  'repair-bay': { id: 'repair-bay', parent: 'engineering-wing', title: 'Ремонтный док', code: 'КОМНАТА 03-В1', subtitle: 'Разборка и монтаж тяжёлых узлов', detail: 'Под потолочной балкой закреплена таль. На опоре ждёт место для нового сердца лифта.', icon: Wrench, department: 'repair', jobIds: ['J_REPAIR'] },
-  'shaft-gallery': { id: 'shaft-gallery', parent: 'engineering-wing', title: 'Галерея шахты', code: 'КОМНАТА 03-В2', subtitle: 'Диагностический доступ к грузовому лифту', detail: 'За ограждением начинается шахта. Датчики, тормоза и тросы доступны с сервисной площадки.', icon: CircleGauge, department: 'repair', jobIds: ['J_DIAG_REPAIR'] },
+  'repair-bay': { id: 'repair-bay', parent: 'engineering-wing', title: 'Ремонтный док', code: 'КОМНАТА 03-В1', subtitle: 'Разборка и монтаж тяжёлых узлов', detail: 'Под потолочной балкой закреплена таль. На опоре ждёт место для нового сердца лифта.', icon: Wrench, department: 'repair', jobIds: ['J_REPAIR', 'repair-drive'] },
+  'shaft-gallery': { id: 'shaft-gallery', parent: 'engineering-wing', title: 'Галерея шахты', code: 'КОМНАТА 03-В2', subtitle: 'Диагностический доступ к грузовому лифту', detail: 'За ограждением начинается шахта. Датчики, тормоза и тросы доступны с сервисной площадки.', icon: CircleGauge, department: 'repair', jobIds: ['J_DIAG_REPAIR', 'drive-diagnostics', 'inspect-impact', 'descend-lower-shaft', 'emergency-start', 'seal-shaft'] },
   'tool-room': { id: 'tool-room', parent: 'engineering-wing', title: 'Инструментальная', code: 'КОМНАТА 03-В3', subtitle: 'Оснастка и личная квалификация', detail: 'Шкафы выдают инструмент по уровню допуска. На терминале можно проверить освоенные знания.', icon: Target, department: 'repair', utility: 'skills' },
   'archive-room': { id: 'archive-room', parent: 'floor-hub', title: 'Комната Архива', code: 'УЗЕЛ 00-А', subtitle: 'Память смен и подтверждённые записи', detail: 'Здесь хранятся решения, которые уже нельзя переписать. Терминал открывает летопись Эпизода.', icon: BookOpen, utility: 'chronicle' },
   'dispatch-room': { id: 'dispatch-room', parent: 'floor-hub', title: 'Диспетчерская', code: 'УЗЕЛ 00-Б', subtitle: 'Сообщения яруса и маршруты нарядов', detail: 'Пустое кресло стоит перед живой панелью. Входящие сообщения продолжают появляться без диспетчера.', icon: Radio, utility: 'terminal' },
@@ -123,12 +136,17 @@ const workstationByJob: Record<string, LocationId> = {
   J_BLANK: 'blank-room', J_BEARING: 'lathe-room', J_FASTENER: 'assembly-room',
   J_DIAG_POWER: 'switchboard-room', J_GENERATE: 'battery-room',
   J_DIAG_REPAIR: 'shaft-gallery', J_REPAIR: 'repair-bay',
+  'drive-diagnostics': 'shaft-gallery', 'power-audit': 'switchboard-room', 'inspect-impact': 'shaft-gallery',
+  'recover-access-log': 'relay-room', 'trace-override': 'relay-room', 'descend-lower-shaft': 'shaft-gallery',
+  'repair-drive': 'repair-bay', 'controlled-test': 'switchboard-room', 'bypass-interlock': 'switchboard-room',
+  'emergency-start': 'shaft-gallery', 'seal-shaft': 'shaft-gallery', 'alternate-supply': 'blank-room',
 }
 
 const defaultSaved: SavedState = {
   name: '', screen: 'lore', department: 'mechanics', location: 'floor-hub', jobId: null,
   jobStartedAt: null, episodeStartedAt: null, incidentAvailableAt: null, activeIncidentId: null, activeIncidentCreatedAt: null, incidentHistory: [], incidentChoice: null,
   incidentProgressBonus: 0, incidentXpBonus: 0, incidentKnowledge: [],
+  contributionCycle: 0, storyMigrated: false,
 }
 
 const STORAGE_KEY = 'zavod-state-v2'
@@ -147,83 +165,83 @@ const option = (title: string, text: string, icon: typeof Wrench, progressBonus:
 
 const incidents: IncidentDefinition[] = [
   {
-    id: 'third-knock', title: 'Третий удар', summary: 'Из-за стены доносятся три ровных удара. После паузы последовательность повторяется.', signal: 'АКУСТИЧЕСКАЯ АНОМАЛИЯ', sector: 'СЕРВИСНЫЙ КОРИДОР', weight: 4, responseSeconds: 600,
+    id: 'third-knock', title: 'Третий удар', summary: 'Из-за стены доносятся три ровных удара. После паузы последовательность повторяется.', signal: 'АКУСТИЧЕСКАЯ АНОМАЛИЯ', sector: 'СЕРВИСНЫЙ КОРИДОР', weight: 4, timeoutOptionId: 'Зафиксировать и продолжить', responseSeconds: 600,
     options: [option('Ответить тем же ритмом', 'Отстучать последовательность по трубе и ждать ответа.', Radio, 0, 4, 'Язык сервисных тоннелей'), option('Найти источник', 'Остановить работу и пройти вдоль стены с акустическим датчиком.', Target, 0, 3), option('Зафиксировать и продолжить', 'Записать звук в журнал, не покидая рабочего места.', BookOpen, 1, 2)],
   },
   {
-    id: 'nameless-pass', title: 'Пропуск без имени', summary: 'На полу лежит свежий пропуск. Вместо имени на нём выцарапан номер сорок восьмого яруса.', signal: 'НЕУЧТЁННЫЙ ИДЕНТИФИКАТОР', sector: 'ПРОХОД 03', weight: 3, responseSeconds: 720,
+    id: 'nameless-pass', title: 'Пропуск без имени', summary: 'На полу лежит свежий пропуск. Вместо имени на нём выцарапан номер сорок восьмого яруса.', signal: 'НЕУЧТЁННЫЙ ИДЕНТИФИКАТОР', sector: 'ПРОХОД 03', weight: 3, timeoutOptionId: 'Передать в Архив', responseSeconds: 720,
     options: [option('Передать в Архив', 'Запечатать находку и оформить запись происхождения.', BookOpen, 0, 3), option('Проверить журнал проходов', 'Сверить номер пропуска с последними открытиями гермодверей.', ListChecks, 0, 4, 'Следы доступа'), option('Оставить на месте', 'Отметить координаты и наблюдать, кто вернётся за пропуском.', Target, 1, 2)],
   },
   {
-    id: 'cold-draft', title: 'Холод снизу', summary: 'Из технологической решётки тянет воздухом, которого не должно быть в замкнутом контуре.', signal: 'РАЗГЕРМЕТИЗАЦИЯ НЕ ПОДТВЕРЖДЕНА', sector: 'НИЖНИЙ НАСТИЛ', weight: 4, responseSeconds: 600,
+    id: 'cold-draft', title: 'Холод снизу', summary: 'Из технологической решётки тянет воздухом, которого не должно быть в замкнутом контуре.', signal: 'РАЗГЕРМЕТИЗАЦИЯ НЕ ПОДТВЕРЖДЕНА', sector: 'НИЖНИЙ НАСТИЛ', weight: 4, timeoutOptionId: 'Закрыть заслонку', responseSeconds: 600,
     options: [option('Закрыть заслонку', 'Изолировать нижний воздуховод ручным приводом.', Wrench, 1, 2), option('Спустить датчик', 'Проверить температуру и состав воздуха под настилом.', Target, 0, 4, 'Воздух нижних ярусов'), option('Позвать дежурного', 'Передать координаты посту герметизации и освободить проход.', Radio, 1, 2)],
   },
   {
-    id: 'missing-minute', title: 'Потерянная минута', summary: 'Все часы сектора одновременно отстают на пятьдесят семь секунд. Центральный хронометр уверен, что они точны.', signal: 'РАССИНХРОНИЗАЦИЯ', sector: 'ВЕСЬ СЕКТОР 03', weight: 2, responseSeconds: 540,
+    id: 'missing-minute', title: 'Потерянная минута', summary: 'Все часы сектора одновременно отстают на пятьдесят семь секунд. Центральный хронометр уверен, что они точны.', signal: 'РАССИНХРОНИЗАЦИЯ', sector: 'ВЕСЬ СЕКТОР 03', weight: 2, timeoutOptionId: 'Сохранить расхождение', responseSeconds: 540,
     options: [option('Верить центральному времени', 'Синхронизировать рабочее место с главным хронометром.', Clock3, 1, 2), option('Сохранить расхождение', 'Не исправлять часы, пока не будет найдена причина сдвига.', BookOpen, 0, 4, 'Хронология отказов'), option('Свериться с соседями', 'Запросить независимые отметки времени у двух отсеков.', Radio, 0, 3)],
   },
   {
-    id: 'intercom-breath', title: 'Дыхание в линии', summary: 'Отключённый переговорник оживает. В динамике слышно дыхание и скрежет далёкой двери.', signal: 'ВХОДЯЩИЙ КАНАЛ БЕЗ АДРЕСА', sector: 'ЛИНИЯ ДИСПЕТЧЕРА', weight: 2, missions: [0, 2], responseSeconds: 480,
+    id: 'intercom-breath', title: 'Дыхание в линии', summary: 'Отключённый переговорник оживает. В динамике слышно дыхание и скрежет далёкой двери.', signal: 'ВХОДЯЩИЙ КАНАЛ БЕЗ АДРЕСА', sector: 'ЛИНИЯ ДИСПЕТЧЕРА', weight: 2, missions: [0, 2], timeoutOptionId: 'Отключить линию физически', responseSeconds: 480,
     options: [option('Назвать свой позывной', 'Открыть канал и потребовать идентификацию собеседника.', Radio, 0, 4), option('Записать молча', 'Не выдавать своего присутствия и сохранить весь сигнал.', BookOpen, 0, 4, 'Шумы закрытых каналов'), option('Отключить линию физически', 'Вынуть разъём переговорника из распределительной панели.', Zap, 1, 2)],
   },
   {
-    id: 'red-dust', title: 'Красная пыль', summary: 'На перчатке остаётся красный порошок. В этом секторе не используют материалы такого цвета.', signal: 'НЕИЗВЕСТНЫЙ МАТЕРИАЛ', sector: 'РАБОЧАЯ ЗОНА', weight: 3, responseSeconds: 660,
+    id: 'red-dust', title: 'Красная пыль', summary: 'На перчатке остаётся красный порошок. В этом секторе не используют материалы такого цвета.', signal: 'НЕИЗВЕСТНЫЙ МАТЕРИАЛ', sector: 'РАБОЧАЯ ЗОНА', weight: 3, timeoutOptionId: 'Очистить рабочее место', responseSeconds: 660,
     options: [option('Собрать образец', 'Изолировать порошок в контейнере для анализа.', Target, 0, 4, 'Следовая экспертиза'), option('Очистить рабочее место', 'Удалить пыль и проверить защитные фильтры.', Wrench, 1, 2), option('Проследить дорожку', 'Идти против следа до места, откуда принесли порошок.', CircleGauge, 0, 3)],
   },
   {
-    id: 'blue-shavings', title: 'Синяя стружка', summary: 'Стружка темнеет и отливает синим: металл нагрелся сильнее, чем показывает датчик.', signal: 'ТЕМПЕРАТУРА ВНЕ МОДЕЛИ', sector: 'СТАНОК 03-А', weight: 5, departments: ['mechanics'], responseSeconds: 600,
+    id: 'blue-shavings', title: 'Синяя стружка', summary: 'Стружка темнеет и отливает синим: металл нагрелся сильнее, чем показывает датчик.', signal: 'ТЕМПЕРАТУРА ВНЕ МОДЕЛИ', sector: 'СТАНОК 03-А', weight: 5, departments: ['mechanics'], timeoutOptionId: 'Уменьшить подачу', responseSeconds: 600,
     options: [option('Сменить резец', 'Остановить проход и установить новый инструмент.', Wrench, 1, 2), option('Проверить датчик', 'Сравнить показания станка с ручным пирометром.', Gauge, 0, 4, 'Тепловая диагностика'), option('Уменьшить подачу', 'Завершить проход на щадящем режиме.', CircleGauge, 1, 3)],
   },
   {
-    id: 'alien-marking', title: 'Чужой номер', summary: 'На заготовке проступает номер детали, которой нет в текущем заказе и заводском каталоге.', signal: 'НЕСООТВЕТСТВИЕ МАРКИРОВКИ', sector: 'СТАНОК 03-А', weight: 3, departments: ['mechanics'], responseSeconds: 720,
+    id: 'alien-marking', title: 'Чужой номер', summary: 'На заготовке проступает номер детали, которой нет в текущем заказе и заводском каталоге.', signal: 'НЕСООТВЕТСТВИЕ МАРКИРОВКИ', sector: 'СТАНОК 03-А', weight: 3, departments: ['mechanics'], timeoutOptionId: 'Отложить деталь', responseSeconds: 720,
     options: [option('Отложить деталь', 'Изолировать заготовку до выяснения её происхождения.', Box, 0, 3), option('Снять слой металла', 'Продолжить обработку и проверить, насколько глубоко нанесён номер.', Cog, 1, 3), option('Искать парную маркировку', 'Проверить склад и последние партии на тот же знак.', Target, 0, 4, 'Скрытая маркировка')],
   },
   {
-    id: 'silent-crack', title: 'Трещина без звука', summary: 'Контрольная жидкость проявляет тонкую линию там, где металл должен быть цельным.', signal: 'СКРЫТЫЙ ДЕФЕКТ', sector: 'ПОСТ КОНТРОЛЯ', weight: 4, departments: ['mechanics'], responseSeconds: 600,
+    id: 'silent-crack', title: 'Трещина без звука', summary: 'Контрольная жидкость проявляет тонкую линию там, где металл должен быть цельным.', signal: 'СКРЫТЫЙ ДЕФЕКТ', sector: 'ПОСТ КОНТРОЛЯ', weight: 4, departments: ['mechanics'], timeoutOptionId: 'Забраковать партию', responseSeconds: 600,
     options: [option('Забраковать партию', 'Остановить обработку всех заготовок из этой плавки.', ShieldAlert, 0, 3), option('Проверить ультразвуком', 'Определить глубину дефекта до принятия решения.', Gauge, 0, 4, 'Дефектоскопия'), option('Вырезать повреждение', 'Попробовать сохранить заготовку, удалив опасный участок.', Cog, 1, 2)],
   },
   {
-    id: 'wrong-rhythm', title: 'Сбитый ритм', summary: 'Автоподача повторяет один лишний ход через каждые семнадцать циклов.', signal: 'СБОЙ ПОСЛЕДОВАТЕЛЬНОСТИ', sector: 'СТАНОК 03-А', weight: 4, departments: ['mechanics'], responseSeconds: 540,
+    id: 'wrong-rhythm', title: 'Сбитый ритм', summary: 'Автоподача повторяет один лишний ход через каждые семнадцать циклов.', signal: 'СБОЙ ПОСЛЕДОВАТЕЛЬНОСТИ', sector: 'СТАНОК 03-А', weight: 4, departments: ['mechanics'], timeoutOptionId: 'Перейти на ручную подачу', responseSeconds: 540,
     options: [option('Перейти на ручную подачу', 'Взять движение суппорта под прямой контроль.', Wrench, 1, 3), option('Дождаться лишнего хода', 'Наблюдать цикл и поймать момент появления сбоя.', Target, 0, 4, 'Ритмы автоматики'), option('Перезапустить контроллер', 'Остановить программу и загрузить её заново.', RotateCcw, 1, 2)],
   },
   {
-    id: 'warm-cable', title: 'Тёплый кабель', summary: 'Обесточенный кабель остаётся тёплым. По схеме у него нет второго источника питания.', signal: 'ОБРАТНОЕ ПИТАНИЕ', sector: 'ЩИТ 03-Б', weight: 5, departments: ['power'], responseSeconds: 540,
+    id: 'warm-cable', title: 'Тёплый кабель', summary: 'Обесточенный кабель остаётся тёплым. По схеме у него нет второго источника питания.', signal: 'ОБРАТНОЕ ПИТАНИЕ', sector: 'ЩИТ 03-Б', weight: 5, departments: ['power'], timeoutOptionId: 'Отсечь кабель', responseSeconds: 540,
     options: [option('Отсечь кабель', 'Физически разомкнуть линию с обеих сторон.', Zap, 0, 3), option('Найти второй источник', 'Пройти трассу с токовыми клещами до скрытого ответвления.', Target, 0, 4, 'Обратные контуры'), option('Поставить под наблюдение', 'Оградить участок и записывать изменение температуры.', Gauge, 1, 2)],
   },
   {
-    id: 'double-flicker', title: 'Свет моргнул дважды', summary: 'Освещение дважды гаснет ровно на одну секунду, но автоматика не фиксирует провала.', signal: 'НЕЗАРЕГИСТРИРОВАННЫЙ ПРОВАЛ', sector: 'СИЛОВОЙ КОНТУР', weight: 4, departments: ['power'], responseSeconds: 600,
+    id: 'double-flicker', title: 'Свет моргнул дважды', summary: 'Освещение дважды гаснет ровно на одну секунду, но автоматика не фиксирует провала.', signal: 'НЕЗАРЕГИСТРИРОВАННЫЙ ПРОВАЛ', sector: 'СИЛОВОЙ КОНТУР', weight: 4, departments: ['power'], timeoutOptionId: 'Перевести свет на резерв', responseSeconds: 600,
     options: [option('Поднять сырые логи', 'Считать данные до того, как контроллер их отфильтрует.', Terminal, 0, 4, 'Сырые журналы сети'), option('Перевести свет на резерв', 'Отделить освещение от основного контура.', Zap, 1, 2), option('Повторить нагрузку', 'Создать тот же режим и попытаться вызвать провал снова.', Gauge, 0, 3)],
   },
   {
-    id: 'extra-consumer', title: 'Лишний потребитель', summary: 'Сеть отдаёт семь киловатт в линию, отсутствующую на схеме яруса.', signal: 'НЕУЧТЁННЫЙ РАСХОД', sector: 'РАСПРЕДЕЛИТЕЛЬ 03-Б', weight: 3, departments: ['power'], responseSeconds: 720,
+    id: 'extra-consumer', title: 'Лишний потребитель', summary: 'Сеть отдаёт семь киловатт в линию, отсутствующую на схеме яруса.', signal: 'НЕУЧТЁННЫЙ РАСХОД', sector: 'РАСПРЕДЕЛИТЕЛЬ 03-Б', weight: 3, departments: ['power'], timeoutOptionId: 'Ограничить мощность', responseSeconds: 720,
     options: [option('Обесточить линию', 'Разомкнуть неизвестный канал на распределителе.', Zap, 1, 2), option('Проследить нагрузку', 'Оставить питание и определить конечную точку по импульсам.', Target, 0, 4, 'Карта скрытой сети'), option('Ограничить мощность', 'Установить безопасный предел и продолжить наблюдение.', Gauge, 1, 3)],
   },
   {
-    id: 'reverse-current', title: 'Ток обратного хода', summary: 'Накопитель на мгновение принимает энергию со стороны остановленного лифта.', signal: 'НАПРАВЛЕНИЕ ТОКА ИЗМЕНЕНО', sector: 'НАКОПИТЕЛЬ 03-Б', weight: 2, departments: ['power'], missions: [0, 2], responseSeconds: 480,
+    id: 'reverse-current', title: 'Ток обратного хода', summary: 'Накопитель на мгновение принимает энергию со стороны остановленного лифта.', signal: 'НАПРАВЛЕНИЕ ТОКА ИЗМЕНЕНО', sector: 'НАКОПИТЕЛЬ 03-Б', weight: 2, departments: ['power'], missions: [0, 2], timeoutOptionId: 'Заземлить импульс', responseSeconds: 480,
     options: [option('Открыть приём', 'Дать импульсу войти в накопитель под контролем защиты.', Zap, 1, 3), option('Снять форму сигнала', 'Изолировать контур измерительным мостом.', Gauge, 0, 4, 'Почерк силовых импульсов'), option('Заземлить импульс', 'Сбросить неизвестную энергию на защитный контур.', ShieldAlert, 0, 2)],
   },
   {
-    id: 'singing-rope', title: 'Трос поёт выше', summary: 'Один из тросов отвечает на удар нотой выше остальных. Натяжение изменилось совсем недавно.', signal: 'РАЗНИЦА НАТЯЖЕНИЯ', sector: 'ЛИФТОВАЯ ШАХТА', weight: 5, departments: ['repair'], responseSeconds: 600,
+    id: 'singing-rope', title: 'Трос поёт выше', summary: 'Один из тросов отвечает на удар нотой выше остальных. Натяжение изменилось совсем недавно.', signal: 'РАЗНИЦА НАТЯЖЕНИЯ', sector: 'ЛИФТОВАЯ ШАХТА', weight: 5, departments: ['repair'], timeoutOptionId: 'Разгрузить трос', responseSeconds: 600,
     options: [option('Разгрузить трос', 'Перенести часть усилия на соседние ветви.', Wrench, 1, 2), option('Измерить всю связку', 'Сравнить частоты каждого троса и составить карту натяжения.', Gauge, 0, 4, 'Акустика тросов'), option('Поставить метку', 'Нанести контрольную риску и наблюдать смещение.', Target, 1, 3)],
   },
   {
-    id: 'fresh-oil', title: 'След свежего масла', summary: 'На давно закрытом люке блестит свежая капля масла. След уходит к шахте.', signal: 'СЛЕД НЕДАВНЕГО ДОСТУПА', sector: 'СЕРВИСНЫЙ ЛЮК', weight: 4, departments: ['repair'], responseSeconds: 720,
+    id: 'fresh-oil', title: 'След свежего масла', summary: 'На давно закрытом люке блестит свежая капля масла. След уходит к шахте.', signal: 'СЛЕД НЕДАВНЕГО ДОСТУПА', sector: 'СЕРВИСНЫЙ ЛЮК', weight: 4, departments: ['repair'], timeoutOptionId: 'Опломбировать проход', responseSeconds: 720,
     options: [option('Открыть люк', 'Проверить пространство за панелью прямо сейчас.', Wrench, 0, 3), option('Снять отпечатки инструмента', 'Сначала изучить царапины на крепеже и кромке.', Target, 0, 4, 'Почерк ремонтника'), option('Опломбировать проход', 'Закрыть люк контрольной лентой и ждать нового доступа.', ShieldAlert, 1, 2)],
   },
   {
-    id: 'forgotten-key', title: 'Дверь не помнит ключ', summary: 'Сервисная дверь принимает ваш ключ, но сообщает, что такой допуск никогда не выдавался.', signal: 'КОНФЛИКТ ПРАВ ДОСТУПА', sector: 'ШЛЮЗ Ш-47', weight: 3, departments: ['repair'], responseSeconds: 600,
+    id: 'forgotten-key', title: 'Дверь не помнит ключ', summary: 'Сервисная дверь принимает ваш ключ, но сообщает, что такой допуск никогда не выдавался.', signal: 'КОНФЛИКТ ПРАВ ДОСТУПА', sector: 'ШЛЮЗ Ш-47', weight: 3, departments: ['repair'], timeoutOptionId: 'Запросить новый допуск', responseSeconds: 600,
     options: [option('Войти по аварийному контуру', 'Открыть механический замок в обход терминала.', Wrench, 1, 2), option('Сравнить копии реестра', 'Найти момент, когда запись о допуске исчезла.', BookOpen, 0, 4, 'История прав доступа'), option('Запросить новый допуск', 'Оставить дверь закрытой и обратиться к диспетчеру.', Radio, 0, 3)],
   },
   {
-    id: 'foreign-bolt', title: 'Болт другой смены', summary: 'В креплении стоит новый болт с клеймом смены, которой нет в списках уже девять лет.', signal: 'НЕСООТВЕТСТВИЕ КЛЕЙМА', sector: 'РЕМОНТНЫЙ ПОСТ 03-В', weight: 3, departments: ['repair'], responseSeconds: 660,
+    id: 'foreign-bolt', title: 'Болт другой смены', summary: 'В креплении стоит новый болт с клеймом смены, которой нет в списках уже девять лет.', signal: 'НЕСООТВЕТСТВИЕ КЛЕЙМА', sector: 'РЕМОНТНЫЙ ПОСТ 03-В', weight: 3, departments: ['repair'], timeoutOptionId: 'Снять болт', responseSeconds: 660,
     options: [option('Снять болт', 'Извлечь крепёж и отправить его в Архив.', Wrench, 0, 3), option('Оставить под нагрузкой', 'Проверить, зачем неизвестный ремонт до сих пор держит узел.', Gauge, 1, 3), option('Найти старую смену', 'Поднять закрытые наряды по номеру клейма.', BookOpen, 0, 4, 'Клейма исчезнувших смен')],
   },
   {
-    id: 'empty-toolbox', title: 'Пустой ящик', summary: 'Запломбированный аварийный ящик оказывается пустым. Пломба не повреждена.', signal: 'НАРУШЕНИЕ КОМПЛЕКТНОСТИ', sector: 'АВАРИЙНЫЙ ПОСТ', weight: 3, missions: [1, 2], responseSeconds: 600,
+    id: 'empty-toolbox', title: 'Пустой ящик', summary: 'Запломбированный аварийный ящик оказывается пустым. Пломба не повреждена.', signal: 'НАРУШЕНИЕ КОМПЛЕКТНОСТИ', sector: 'АВАРИЙНЫЙ ПОСТ', weight: 3, missions: [1, 2], timeoutOptionId: 'Собрать свой набор', responseSeconds: 600,
     options: [option('Вскрыть соседний комплект', 'Проверить второй ящик и восстановить оснащение поста.', Box, 1, 2), option('Исследовать пломбу', 'Определить, когда и каким способом ящик опустошили.', Target, 0, 4, 'Поддельные пломбы'), option('Собрать свой набор', 'Заменить пропажу инструментами с рабочего места.', Wrench, 1, 3)],
   },
   {
-    id: 'lift-call', title: 'Вызов из пустой кабины', summary: 'На панели загорается запрос с грузового лифта. По журналу кабина обесточена и пуста.', signal: 'ВЫЗОВ С ОТКЛЮЧЁННОГО ОБЪЕКТА', sector: 'ЛИФТОВАЯ ЛИНИЯ', weight: 1, missions: [0, 2], responseSeconds: 420,
+    id: 'lift-call', title: 'Вызов из пустой кабины', summary: 'На панели загорается запрос с грузового лифта. По журналу кабина обесточена и пуста.', signal: 'ВЫЗОВ С ОТКЛЮЧЁННОГО ОБЪЕКТА', sector: 'ЛИФТОВАЯ ЛИНИЯ', weight: 1, missions: [0, 2], timeoutOptionId: 'Сбросить запрос', responseSeconds: 420,
     options: [option('Ответить на вызов', 'Открыть служебный канал кабины.', Radio, 0, 4), option('Определить источник', 'Трассировать сигнал, не отвечая отправителю.', Target, 0, 4, 'Фантомные вызовы'), option('Сбросить запрос', 'Очистить панель и заблокировать повторный вызов.', ShieldAlert, 1, 2)],
   },
 ]
@@ -426,11 +444,19 @@ function loadState(): SavedState {
 }
 
 function App() {
+  const story = useStory()
   const [state, setState] = useState<SavedState>(loadState)
   const [nameDraft, setNameDraft] = useState(state.name || getTelegramUserName())
   const [now, setNow] = useState(Date.now())
   const [menuOpen, setMenuOpen] = useState(false)
   const [tickerVisible, setTickerVisible] = useState(true)
+  const bundle = story.bundle
+  const activeWork = bundle?.works.find(work => work.id === state.jobId && work.status !== 'completed') ?? null
+  const activeJob = activeWork ? workToJob(activeWork) : null
+  const availableWorks = bundle?.works.filter(work => ['available', 'active', 'locked_skill'].includes(work.status)) ?? []
+  const primaryWork = activeWork ?? availableWorks.find(work => work.status !== 'locked_skill') ?? availableWorks[0] ?? null
+  const elapsed = activeJob && state.jobStartedAt ? Math.max(0, Math.floor((now - state.jobStartedAt) / 1000)) : 0
+  const jobProgress = activeWork?.progress ?? 0
 
   useEffect(() => {
     localStorage.removeItem('zavod-state-v1')
@@ -489,34 +515,38 @@ function App() {
         if (now - prev.incidentAvailableAt > 15 * 60 * 1000) {
           return { ...prev, incidentAvailableAt: scheduleIncidentAt(now, true) }
         }
-        const workUnits = prev.episodeStartedAt ? Math.min(EPISODE_WORK_UNITS, Math.floor((now - prev.episodeStartedAt) / 60_000) + prev.incidentProgressBonus) : 0
-        const assignment = getStoryAssignment(workUnits)
-        const incident = chooseIncident(prev, assignment.workPackage.department, assignment.missionIndex)
+        const work = bundle?.works.find(item => item.id === prev.jobId)
+        const incident = chooseIncident(prev, work?.department ?? prev.department, bundle?.episode.phase === 'investigation' ? 0 : bundle?.episode.phase === 'council' ? 1 : 2)
         return { ...prev, activeIncidentId: incident.id, activeIncidentCreatedAt: now, incidentAvailableAt: null }
       })
     }
-  }, [now, state.activeIncidentId, state.incidentAvailableAt])
+  }, [now, state.activeIncidentId, state.incidentAvailableAt, bundle])
 
   useEffect(() => {
     const incident = getIncident(state.activeIncidentId)
     if (incident && state.activeIncidentCreatedAt && now - state.activeIncidentCreatedAt >= incident.responseSeconds * 1000) {
       setState(prev => {
         const current = getIncident(prev.activeIncidentId)
-        return current ? resolveIncident(prev, current, current.options[0], now) : prev
+        const timeoutOption = current?.options.find(option => option.title === current.timeoutOptionId)
+        return current && timeoutOption ? resolveIncident(prev, current, timeoutOption, now) : prev
       })
     }
   }, [now, state.activeIncidentId, state.activeIncidentCreatedAt])
 
-  const hasActiveShift = Boolean(state.jobId)
-  const elapsed = state.jobStartedAt ? Math.max(0, Math.floor((now - state.jobStartedAt) / 1000)) : 0
-  const episodeElapsed = state.episodeStartedAt ? Math.max(0, Math.floor((now - state.episodeStartedAt) / 1000)) : 0
-  const episodeWorkUnits = hasActiveShift ? Math.min(EPISODE_WORK_UNITS, Math.floor(episodeElapsed / 60) + state.incidentProgressBonus) : 0
-  const assignment = getStoryAssignment(episodeWorkUnits)
-  const assignmentBaseJob = jobs.find(item => item.id === assignment.workPackage.jobId) ?? jobs[0]
-  const assignmentJob: Job = { ...assignmentBaseJob, title: assignment.task, description: assignment.workPackage.purpose, department: assignment.workPackage.department, target: ORDER_WORK_UNITS }
-  const job = hasActiveShift ? assignmentJob : null
-  const jobProgress = job ? episodeWorkUnits === EPISODE_WORK_UNITS ? job.target : episodeWorkUnits % ORDER_WORK_UNITS : 0
-  const operationProgress = Math.round(episodeWorkUnits / EPISODE_WORK_UNITS * 100)
+  useEffect(() => {
+    if (state.jobId && bundle?.works.some(work => work.id === state.jobId && work.status === 'completed')) {
+      setState(prev => ({ ...prev, jobId: null, jobStartedAt: null, contributionCycle: 0 }))
+    }
+  }, [bundle?.works, state.jobId])
+
+  useEffect(() => {
+    if (!activeWork || !state.jobStartedAt || story.busy || bundle?.episode.mode === 'offline-cache') return
+    const completedCycle = Math.floor((now - state.jobStartedAt) / 60_000)
+    if (completedCycle <= state.contributionCycle) return
+    const nextCycle = state.contributionCycle + 1
+    const eventId = `${bundle?.player.id ?? 'local'}:${activeWork.id}:${state.jobStartedAt}:${nextCycle}`
+    story.contribute(activeWork.id, eventId).then(() => setState(prev => ({ ...prev, contributionCycle: Math.max(prev.contributionCycle, nextCycle) }))).catch(() => undefined)
+  }, [activeWork, bundle?.episode.mode, bundle?.player.id, now, state.contributionCycle, state.jobStartedAt, story.busy, story.contribute])
 
   const navigate = (screen: Screen) => {
     haptic('selection')
@@ -535,10 +565,11 @@ function App() {
     const clean = nameDraft.trim().slice(0, 24)
     if (clean.length < 2) return
     haptic('success')
+    story.setDisplayName(clean)
     setState(prev => ({ ...prev, name: clean, screen: 'floor' }))
   }
 
-  const beginJob = (selected: Job) => {
+  const beginJob = (selected: WorkView) => {
     haptic('success')
     const startedAt = Date.now()
     setState(prev => ({
@@ -547,6 +578,7 @@ function App() {
       jobId: selected.id,
       jobStartedAt: startedAt,
       episodeStartedAt: prev.episodeStartedAt ?? startedAt,
+      contributionCycle: 0,
       incidentAvailableAt: prev.incidentAvailableAt ?? scheduleIncidentAt(startedAt, true),
       screen: 'journal',
     }))
@@ -555,34 +587,38 @@ function App() {
   if (state.screen === 'lore') return <LoreIntro continueIntro={() => setState(prev => ({ ...prev, screen: 'briefing' }))} />
   if (state.screen === 'briefing') return <Briefing continueGame={() => setState(prev => ({ ...prev, screen: 'onboarding' }))} />
   if (state.screen === 'onboarding') return <Onboarding name={nameDraft} setName={setNameDraft} submit={createCharacter} />
+  if (!bundle) return <div className="story-loading"><span className="brand-z">Z</span><b>ПОДКЛЮЧЕНИЕ К АРХИВУ</b><p>{story.error ?? 'Получаем общее состояние Эпизода…'}</p></div>
 
   return (
     <div className="app-shell">
-      <DesktopRail state={state} progress={jobProgress} operationProgress={operationProgress} job={job} navigate={navigate} />
+      <DesktopRail state={state} progress={jobProgress} episode={bundle.episode} job={activeJob} navigate={navigate} />
       <main className="game-frame">
-        <TopBar state={state} navigate={navigate} menuOpen={menuOpen} setMenuOpen={setMenuOpen} reset={reset} />
+        <TopBar state={state} episode={bundle.episode} navigate={navigate} menuOpen={menuOpen} setMenuOpen={setMenuOpen} reset={reset} />
         {tickerVisible && state.screen === 'floor' && (
           <button className="ticker" onClick={() => navigate('terminal')} aria-label="Открыть сообщение в терминале">
             <span className="ticker-icon"><Radio size={14} /></span>
             <span className="ticker-label">ЯРУС 47</span>
-            <span className="ticker-scroll"><span>ТРЕБУЮТСЯ ПОДШИПНИКИ ДЛЯ ЛИФТА&nbsp;&nbsp;•&nbsp;&nbsp;ЗАПРОС ИНЖЕНЕРНОГО ОТСЕКА</span></span>
+            <span className="ticker-scroll"><span>{bundle.episode.latestChronicle?.lead ?? bundle.episode.goalDetail}</span></span>
             <ChevronRight size={16} />
           </button>
         )}
 
         <section className="screen-area">
-          {state.screen === 'floor' && <Floor state={state} setState={setState} job={job} progress={jobProgress} episodeWorkUnits={episodeWorkUnits} operationProgress={operationProgress} navigate={navigate} />}
-          {state.screen === 'jobs' && <Jobs department={state.department} location={locations[state.location]} assignmentJob={assignmentJob} activeJob={job} episodeWorkUnits={episodeWorkUnits} beginJob={beginJob} continueJob={() => navigate('journal')} back={() => navigate('floor')} />}
-          {state.screen === 'journal' && <Journal state={state} job={job} progress={jobProgress} episodeWorkUnits={episodeWorkUnits} elapsed={elapsed} navigate={navigate} />}
+          {state.screen === 'floor' && <Floor state={state} setState={setState} job={activeJob} work={primaryWork} progress={jobProgress} episode={bundle.episode} chronicle={bundle.chronicle} navigate={navigate} setRemoteLocation={story.setLocation} />}
+          {state.screen === 'jobs' && <Jobs location={locations[state.location]} works={bundle.works.filter(work => work.location === state.location)} activeWork={activeWork} beginJob={beginJob} continueJob={() => navigate('journal')} back={() => navigate('floor')} />}
+          {state.screen === 'journal' && <Journal state={state} job={activeJob} work={activeWork} progress={jobProgress} elapsed={elapsed} navigate={navigate} />}
           {state.screen === 'incident' && <Incident state={state} setState={setState} navigate={navigate} remaining={Math.max(0, (getIncident(state.activeIncidentId)?.responseSeconds ?? 0) - Math.floor((now - (state.activeIncidentCreatedAt ?? now)) / 1000))} />}
-          {state.screen === 'skills' && <Skills state={state} episodeWorkUnits={episodeWorkUnits} />}
-          {state.screen === 'map' && <DepartmentMap state={state} setState={setState} navigate={navigate} />}
-          {state.screen === 'terminal' && <NewsTerminal navigate={navigate} openProductionJobs={() => setState(prev => ({ ...prev, location: 'floor-hub', screen: 'floor' }))} />}
-          {state.screen === 'chronicle' && <Chronicle state={state} job={job} progress={jobProgress} episodeWorkUnits={episodeWorkUnits} operationProgress={operationProgress} navigate={navigate} />}
-          {state.screen === 'objectives' && <Objectives state={state} job={job} progress={jobProgress} episodeWorkUnits={episodeWorkUnits} operationProgress={operationProgress} setState={setState} navigate={navigate} />}
+          {state.screen === 'skills' && <Skills state={state} player={bundle.player} />}
+          {state.screen === 'map' && <DepartmentMap state={state} setState={setState} navigate={navigate} setRemoteLocation={story.setLocation} />}
+          {state.screen === 'terminal' && <NewsTerminal episode={bundle.episode} chronicle={bundle.chronicle} navigate={navigate} openProductionJobs={() => setState(prev => ({ ...prev, location: 'floor-hub', screen: 'floor' }))} />}
+          {state.screen === 'chronicle' && <Chronicle state={state} job={activeJob} progress={jobProgress} episode={bundle.episode} chronicle={bundle.chronicle} player={bundle.player} navigate={navigate} />}
+          {state.screen === 'objectives' && <Objectives state={state} job={activeJob} progress={jobProgress} episode={bundle.episode} works={availableWorks} council={bundle.episode.council} busy={story.busy} vote={story.vote} resolveDemo={story.resolveDemoCouncil} setState={setState} navigate={navigate} />}
         </section>
         <BottomNav current={state.screen} navigate={navigate} />
       </main>
+      <StoryModeBanner mode={bundle.episode.mode} error={story.error} />
+      {!state.storyMigrated && <MigrationNotice accept={() => setState(prev => ({ ...prev, storyMigrated: true }))} />}
+      {state.storyMigrated && bundle.recap.whileAway.length > 0 && <RecapModal recap={bundle.recap} close={() => story.markRead(bundle.recap.latestSequence)} navigate={navigate} />}
     </div>
   )
 }
@@ -685,7 +721,7 @@ function Onboarding({ name, setName, submit }: { name: string, setName: (v: stri
           <span>{name.length}/24</span>
         </div>
         <button className="primary-button" onClick={submit} disabled={name.trim().length < 2}>ВОЙТИ НА ЯРУС <ArrowRight size={18} /></button>
-        <p className="microcopy"><ShieldAlert size={14} /> Данные персонажа сохраняются только на этом устройстве</p>
+        <p className="microcopy"><ShieldAlert size={14} /> В Telegram личность проверяет сервер; обычный браузер запускает локальную демонстрацию</p>
       </section>
       <div className="system-status"><span className="status-dot" /> СИСТЕМЫ ЯРУСА В СЕТИ <b>03:17:42</b></div>
     </main>
@@ -705,36 +741,35 @@ function Briefing({ continueGame }: { continueGame: () => void }) {
           <p className="lead-detail">Лифт связывает производственный ярус с верхними секторами. Без него туда не попадут детали и энергетические модули. Запаса на складах хватит, чтобы не объявлять эвакуацию немедленно, но каждая следующая смена делает восстановление труднее.</p>
           <blockquote className="briefing-transcript"><span>ПОСЛЕДНЯЯ ПЕРЕДАЧА · 03:17:50</span><p>«Слышу удар ниже кабины. Отключаю линию и проверяю…»</p><small>СВЯЗЬ ОБОРВАНА · ДИСПЕТЧЕР НЕ ОТВЕЧАЕТ</small></blockquote>
           <div className="briefing-alert"><AlertTriangle size={20} /><div><b>Местоположение диспетчера неизвестно</b><span>Кабина не отвечает на вызов · аварийный канал молчит</span></div></div>
-          <div className="episode-facts"><span><b>03:17:42</b> остановка</span><span><b>3</b> версии отказа</span><span><b>24 ч</b> путь соло</span></div>
+          <div className="episode-facts"><span><b>03:17:42</b> остановка</span><span><b>2</b> независимых проверки</span><span><b>?</b> причина неизвестна</span></div>
         </section>
         <section className="operation-plan">
-          <div className="section-kicker">ПЛАН ЭПИЗОДА <span>3 СЮЖЕТНЫЕ МИССИИ · ≈24 ЧАСА</span></div>
+          <div className="section-kicker">ПЕРВЫЕ НАПРАВЛЕНИЯ <span>БУДУЩИЙ ПУТЬ СКРЫТ</span></div>
           {[
-            { num: '01', title: 'Тишина в шахте', dept: 'Найти причину · 8 часов', summary: 'Восстановить повреждённую последовательность событий и понять, что произошло раньше: удар, износ или отключение.', Icon: Wrench },
-            { num: '02', title: 'Сердце для лифта', dept: 'Подготовить восстановление · 8 часов', summary: 'Превратить диагноз в металл: изготовить узлы, собрать крепёж и доставить полный комплект к шахте.', Icon: Cog },
-            { num: '03', title: 'Первое движение', dept: 'Вернуть лифт в строй · 8 часов', summary: 'Смонтировать привод, вернуть питание и рискнуть первым подъёмом, когда шахта ещё хранит не все ответы.', Icon: Zap },
+            { num: '01', title: 'Выслушать молчащий привод', dept: 'Галерея шахты · инженерное крыло', summary: 'Снять независимый технический диагноз, не пытаясь запустить механизм.', Icon: Wrench },
+            { num: '02', title: 'Прочитать память погасшей линии', dept: 'Силовая щитовая · энергетическое крыло', summary: 'Восстановить порядок срабатывания защиты по сырому журналу.', Icon: Zap },
           ].map(({ num, title, dept, summary, Icon }) => (
             <div className="operation-step" key={num}>
               <span className="step-num">{num}</span><span className="step-icon"><Icon size={22} /></span>
-              <div><b>{title}</b><span>{dept}</span><p>{summary}</p></div><span className="step-status">МИССИЯ</span>
+              <div><b>{title}</b><span>{dept}</span><p>{summary}</p></div><span className="step-status">ДОСТУПНО</span>
             </div>
           ))}
-          <div className="collective-goal"><Users size={20} /><div><b>Ваши решения станут частью сюжета</b><span>Конкретные задачи объединяются в этапы и миссии. Дневник сохранит не только сделанное, но и то, каким способом вы прошли через происшествия.</span></div></div>
+          <div className="collective-goal"><Users size={20} /><div><b>Результаты изменят доступные действия</b><span>Завод покажет только ближайшие работы. Новые направления, важные решения и возможные исходы откроются из подтверждённых фактов.</span></div></div>
           <button className="primary-button" onClick={continueGame}>ПОЛУЧИТЬ ПРОПУСК <ArrowRight size={18} /></button>
         </section>
       </div>
-      <footer className="briefing-footer"><span>МЕГАЗАВОД // ВНУТРЕННЯЯ СЕТЬ</span><span>СОЛО-ПРОХОЖДЕНИЕ: ОКОЛО 24 ЧАСОВ</span></footer>
+      <footer className="briefing-footer"><span>МЕГАЗАВОД // ВНУТРЕННЯЯ СЕТЬ</span><span>ОБЩИЙ ЭПИЗОД · РЕЗУЛЬТАТЫ ПУБЛИКУЮТСЯ АВТОМАТИЧЕСКИ</span></footer>
     </main>
   )
 }
 
-function DesktopRail({ state, progress, operationProgress, job, navigate }: { state: SavedState, progress: number, operationProgress: number, job: Job | null, navigate: (s: Screen) => void }) {
+function DesktopRail({ state, progress, episode, job, navigate }: { state: SavedState, progress: number, episode: EpisodeSnapshot, job: Job | null, navigate: (s: Screen) => void }) {
   return (
     <aside className="desktop-rail">
       <div className="rail-brand">Z<span>ЗАВОД</span></div>
       <div className="rail-section">
-        <span className="rail-label">ОПЕРАЦИЯ</span><b>Немой лифт</b><small>Ярус 47 · Эпизод 01</small>
-        <div className="rail-progress"><span style={{ width: `${operationProgress}%` }} /></div><small>Общий прогресс {operationProgress}%</small>
+        <span className="rail-label">ОБЩАЯ ЦЕЛЬ</span><b>{episode.goal}</b><small>{episode.goalDetail}</small>
+        <div className="rail-progress"><span style={{ width: `${Math.min(100, episode.publicFacts.length * 20)}%` }} /></div><small>Подтверждённых сведений: {episode.publicFacts.filter(fact => fact.certainty === 'confirmed').length}</small>
         <button className="rail-plan" onClick={() => navigate('objectives')}><ListChecks size={15} /> Открыть план операции</button>
       </div>
       <div className="rail-section resource-list">
@@ -751,13 +786,13 @@ function DesktopRail({ state, progress, operationProgress, job, navigate }: { st
   )
 }
 
-function TopBar({ state, navigate, menuOpen, setMenuOpen, reset }: { state: SavedState, navigate: (s: Screen) => void, menuOpen: boolean, setMenuOpen: (v: boolean) => void, reset: () => void }) {
+function TopBar({ state, episode, navigate, menuOpen, setMenuOpen, reset }: { state: SavedState, episode: EpisodeSnapshot, navigate: (s: Screen) => void, menuOpen: boolean, setMenuOpen: (v: boolean) => void, reset: () => void }) {
   return (
     <header className="top-bar">
       <button className="mobile-brand" onClick={() => navigate('floor')}><span>Z</span><b>МЕГАЗАВОД</b></button>
       <div className="top-context"><span>ЭПИЗОД 01</span><b>НЕМОЙ ЛИФТ</b></div>
       <div className="top-stats"><span><Box size={15} /> 12</span><span><Zap size={15} /> 21</span><span><Wrench size={15} /> 8</span></div>
-      <button className="task-button" onClick={() => navigate('objectives')} aria-label="Открыть текущие задачи"><ListChecks size={19} /><span>ЗАДАЧИ</span><i /></button>
+      <button className="task-button" onClick={() => navigate('objectives')} aria-label="Открыть текущие задачи"><ListChecks size={19} /><span>{episode.council?.status === 'open' ? 'ВЕЧЕ' : 'ЗАДАЧИ'}</span><i /></button>
       <button className="icon-button" onClick={() => setMenuOpen(!menuOpen)} aria-label="Меню"><Menu size={21} /></button>
       {menuOpen && <div className="popover-menu"><button onClick={() => { navigate('chronicle'); setMenuOpen(false) }}><BookOpen size={16} /> Летопись</button><button onClick={reset}><RotateCcw size={16} /> Начать заново</button></div>}
     </header>
@@ -778,52 +813,46 @@ function ActionProgress({ job, elapsed, compact = false }: { job: Job, elapsed: 
   </div>
 }
 
-function CurrentDirective({ state, job, progress, episodeWorkUnits, setState, navigate }: { state: SavedState, job: Job | null, progress: number, episodeWorkUnits: number, setState: React.Dispatch<React.SetStateAction<SavedState>>, navigate: (s: Screen) => void }) {
+function CurrentDirective({ state, job, work, progress, episode, setState, navigate }: { state: SavedState, job: Job | null, work: WorkView | null, progress: number, episode: EpisodeSnapshot, setState: React.Dispatch<React.SetStateAction<SavedState>>, navigate: (s: Screen) => void }) {
   const activeIncident = getIncident(state.activeIncidentId)
   const urgent = Boolean(job && activeIncident)
-  const assignment = getStoryAssignment(episodeWorkUnits)
-  const target = getWorkstation(job?.id ?? assignment.workPackage.jobId)
+  const target = work ? getWorkstation(work.id) : locations['floor-hub']
   const atWorkstation = state.location === target.id
   const nextLocation = locations[getNextLocation(state.location, target.id)]
   const route = getLocationPath(target.id).map(location => location.title).join(' → ')
-  const title = !job ? assignment.task : urgent ? 'Примите решение по происшествию' : 'Выполните текущую задачу'
-  const description = !job
-    ? `${assignment.workPackage.purpose} Маршрут: ${route}.`
-    : urgent
-      ? `${activeIncident?.title}: ${activeIncident?.summary} Решение ограничено по времени.`
-      : `${job.title}: выполнено ${progress} из ${job.target}. Рабочее место: «${target.title}». ${atWorkstation ? 'Вы на месте.' : `Маршрут: ${route}.`}`
+  const title = urgent ? 'Примите решение по происшествию' : job ? job.title : work ? work.title : episode.goal
+  const description = urgent
+    ? `${activeIncident?.title}: ${activeIncident?.summary} Решение ограничено по времени.`
+    : work
+      ? `${work.description} Ближайший результат: ${work.nearestResult}. ${atWorkstation ? 'Вы на месте.' : `Маршрут: ${route}.`}`
+      : episode.goalDetail
   const action = () => {
     if (urgent) return navigate('incident')
+    if (!work) return navigate('objectives')
     if (atWorkstation) return navigate(job ? 'journal' : 'jobs')
     setState(prev => ({ ...prev, department: target.department ?? prev.department, location: nextLocation.id, screen: 'floor' }))
   }
 
   return <section className={`current-directive ${urgent ? 'urgent' : ''}`}>
     <div className="directive-icon">{urgent ? <AlertTriangle /> : <Target />}</div>
-    <div className="directive-copy"><span>{urgent ? 'ТРЕБУЕТ РЕШЕНИЯ' : 'ЧТО ДЕЛАТЬ СЕЙЧАС'}</span><h2>{title}</h2><p>{description}</p>{job && !urgent && <ActionProgress job={job} elapsed={state.jobStartedAt ? Math.floor((Date.now() - state.jobStartedAt) / 1000) : 0} compact />}</div>
-    <div className="directive-actions"><button className="directive-primary" onClick={action}>{urgent ? 'ПРИНЯТЬ РЕШЕНИЕ' : atWorkstation ? job ? 'ОТКРЫТЬ ДНЕВНИК' : 'ОТКРЫТЬ РАБОЧЕЕ МЕСТО' : `ВОЙТИ: ${nextLocation.title}`} <ArrowRight size={16} /></button><button className="directive-secondary" onClick={() => navigate('objectives')}><ListChecks size={15} /> ВЕСЬ ПЛАН</button></div>
+    <div className="directive-copy"><span>{urgent ? 'ТРЕБУЕТ РЕШЕНИЯ' : work ? 'ЧТО ДЕЛАТЬ СЕЙЧАС' : 'ОБЩАЯ ЦЕЛЬ'}</span><h2>{title}</h2><p>{description}</p>{job && !urgent && <ActionProgress job={job} elapsed={state.jobStartedAt ? Math.floor((Date.now() - state.jobStartedAt) / 1000) : 0} compact />}</div>
+    <div className="directive-actions"><button className="directive-primary" onClick={action}>{urgent ? 'ПРИНЯТЬ РЕШЕНИЕ' : !work ? 'ОТКРЫТЬ СВОДКУ' : atWorkstation ? job ? 'ОТКРЫТЬ ДНЕВНИК' : 'ОТКРЫТЬ РАБОЧЕЕ МЕСТО' : `ВОЙТИ: ${nextLocation.title}`} <ArrowRight size={16} /></button><button className="directive-secondary" onClick={() => navigate('objectives')}><ListChecks size={15} /> СВОДКА</button></div>
   </section>
 }
 
-function StoryPassage({ state, episodeWorkUnits }: { state: SavedState, episodeWorkUnits: number }) {
-  const complete = episodeWorkUnits >= EPISODE_WORK_UNITS
-  const passageIndex = Math.min(narrativePassages.length - 1, Math.floor(episodeWorkUnits / PACKAGE_WORK_UNITS))
-  const passage = complete ? episodeEpilogue : narrativePassages[passageIndex]
-  const unitsToNextPage = complete ? 0 : PACKAGE_WORK_UNITS - episodeWorkUnits % PACKAGE_WORK_UNITS
-  const choiceEcho = state.incidentChoice ? choiceEchoes[state.incidentChoice] : null
-
+function StoryPassage({ entry, complete }: { entry: StoryChronicleEntry | null, complete: boolean }) {
+  if (!entry) return null
   return <aside className={`story-passage ${complete ? 'complete' : ''}`}>
-    <div className="story-page-number">{complete ? 'Э' : String(passageIndex + 1).padStart(2, '0')}</div>
-    <div className="story-copy"><span>{passage.chapter} · {passage.scene}</span><h2>{passage.title}</h2><p>«{passage.text}»</p>{choiceEcho && <em>{choiceEcho}</em>}</div>
-    <div className="story-next"><BookOpen size={17} /><span>{complete ? 'ЭПИЗОД ЗАВЕРШЁН' : `НОВАЯ СТРАНИЦА ЧЕРЕЗ ≈ ${formatLongDuration(unitsToNextPage * 60)}`}</span></div>
+    <div className="story-page-number">{String(entry.sequence).padStart(2, '0')}</div>
+    <div className="story-copy"><span>{entry.type === 'finale' ? 'ФИНАЛЬНАЯ ГЛАВА' : entry.type === 'council' ? 'РЕШЕНИЕ ВЕЧЕ' : 'ЛЕТОПИСЬ ЭПИЗОДА'}</span><h2>{entry.title}</h2><p>«{entry.lead}»</p></div>
+    <div className="story-next"><BookOpen size={17} /><span>{complete ? 'ЭПИЗОД ЗАВЕРШЁН' : 'НОВАЯ ГЛАВА ПОЯВИТСЯ ПОСЛЕ ЗНАЧИМОГО РЕЗУЛЬТАТА'}</span></div>
   </aside>
 }
 
-function Floor({ state, setState, job, progress, episodeWorkUnits, operationProgress, navigate }: { state: SavedState, setState: React.Dispatch<React.SetStateAction<SavedState>>, job: Job | null, progress: number, episodeWorkUnits: number, operationProgress: number, navigate: (s: Screen) => void }) {
+function Floor({ state, setState, job, work, progress, episode, chronicle, navigate, setRemoteLocation }: { state: SavedState, setState: React.Dispatch<React.SetStateAction<SavedState>>, job: Job | null, work: WorkView | null, progress: number, episode: EpisodeSnapshot, chronicle: StoryChronicleEntry[], navigate: (s: Screen) => void, setRemoteLocation: (location: string) => void }) {
   const location = locations[state.location]
   const Icon = location.icon
-  const assignment = getStoryAssignment(episodeWorkUnits)
-  const target = getWorkstation(job?.id ?? assignment.workPackage.jobId)
+  const target = work ? getWorkstation(work.id) : locations['floor-hub']
   const targetPath = new Set(getLocationPath(target.id).map(item => item.id))
   const path = getLocationPath(location.id)
   const children = (location.children ?? []).map(id => locations[id])
@@ -831,6 +860,7 @@ function Floor({ state, setState, job, progress, episodeWorkUnits, operationProg
     const destination = locations[id]
     haptic('selection')
     setState(prev => ({ ...prev, location: id, department: destination.department ?? prev.department, screen: 'floor' }))
+    setRemoteLocation(id)
   }
   const interact = () => {
     if (location.jobIds) return setState(prev => ({ ...prev, department: location.department ?? prev.department, screen: 'jobs' }))
@@ -845,197 +875,124 @@ function Floor({ state, setState, job, progress, episodeWorkUnits, operationProg
         <div><span className="eyebrow"><span /> {location.code}</span><h1>{location.title}</h1><p>{location.subtitle}</p></div>
         {location.parent ? <button className="department-switch" onClick={() => enter(location.parent!)}><ArrowLeft size={17} /> НАЗАД: {locations[location.parent].title}</button> : <button className="department-switch" onClick={() => navigate('map')}><Map size={17} /> СХЕМА ЯРУСА</button>}
       </div>
-      <CurrentDirective state={state} job={job} progress={progress} episodeWorkUnits={episodeWorkUnits} setState={setState} navigate={navigate} />
-      {job && <StoryPassage state={state} episodeWorkUnits={episodeWorkUnits} />}
+      <CurrentDirective state={state} job={job} work={work} progress={progress} episode={episode} setState={setState} navigate={navigate} />
+      <StoryPassage entry={chronicle.at(-1) ?? null} complete={episode.status === 'complete'} />
       <div className="floor-layout">
         <div className={`location-stage ${location.children ? 'location-directory' : 'location-room'} dept-${location.department ?? 'hub'}`}>
           <div className="scene-grid" aria-hidden="true" /><div className="pipe pipe-a" /><div className="pipe pipe-b" />
           <div className="location-intro"><span>{location.code}</span><h2>{location.title}</h2><p>{location.detail}</p></div>
           {children.length > 0 && <div className={`location-grid ${location.id === 'floor-hub' ? 'hub-grid' : ''}`}>{children.map(child => { const ChildIcon = child.icon; const onRoute = targetPath.has(child.id); return <button className={`location-card ${onRoute ? 'route' : ''}`} key={child.id} onClick={() => enter(child.id)}><span className="location-card-icon"><ChildIcon /></span><span className="location-card-copy"><small>{child.code}</small><b>{child.title}</b><em>{child.subtitle}</em></span>{onRoute && <strong><Target size={12} /> МАРШРУТ ЗАДАЧИ</strong>}<ChevronRight size={19} /></button> })}</div>}
-          {!children.length && <div className={`room-equipment ${target.id === location.id ? 'route' : ''}`}><div className="room-machine"><Icon size={72} /><span className="machine-glow" /></div><div><small>{location.jobIds ? 'РАБОЧЕЕ ОБОРУДОВАНИЕ' : 'ДОСТУПНЫЙ ОБЪЕКТ'}</small><h3>{equipmentName}</h3><p>{target.id === location.id ? `Здесь выполняется текущая задача «${job?.title ?? assignment.task}».` : location.detail}</p><button onClick={interact}>{location.jobIds ? target.id === location.id ? 'ВСТАТЬ ЗА РАБОЧЕЕ МЕСТО' : 'ОСМОТРЕТЬ РАБОЧЕЕ МЕСТО' : utilityLabel} <ArrowRight size={17} /></button></div></div>}
+          {!children.length && <div className={`room-equipment ${target.id === location.id ? 'route' : ''}`}><div className="room-machine"><Icon size={72} /><span className="machine-glow" /></div><div><small>{location.jobIds ? 'РАБОЧЕЕ ОБОРУДОВАНИЕ' : 'ДОСТУПНЫЙ ОБЪЕКТ'}</small><h3>{equipmentName}</h3><p>{target.id === location.id && work ? `Здесь доступна работа «${work.title}».` : location.detail}</p><button onClick={interact}>{location.jobIds ? target.id === location.id ? 'ВСТАТЬ ЗА РАБОЧЕЕ МЕСТО' : 'ПРОВЕРИТЬ ДОСТУПНЫЕ РАБОТЫ' : utilityLabel} <ArrowRight size={17} /></button></div></div>}
         </div>
         <aside className="floor-status">
           <div className="status-title"><Icon size={19} /><span><small>ТЕКУЩАЯ ЛОКАЦИЯ</small><b>{location.title}</b></span><i>ДОСТУПНО</i></div>
-          <div className="metric"><span>Готовность операции</span><b>{operationProgress}%</b><div><i style={{ width: `${operationProgress}%` }} /></div></div>
+          <div className="metric"><span>Опубликовано фактов</span><b>{episode.publicFacts.length}</b><div><i style={{ width: `${Math.min(100, episode.publicFacts.length * 20)}%` }} /></div></div>
           <div className="metric"><span>Глубина маршрута</span><b>{path.length} / 3</b><div><i className="blue" style={{ width: `${path.length / 3 * 100}%` }} /></div></div>
-          {job ? <div className="active-task"><span className="live-line"><i /> ВАША РАБОТА</span><b>{job.title}</b><p>{progress} из {job.target} · место: {target.title}</p><button onClick={() => location.id === target.id ? navigate('journal') : enter(getNextLocation(location.id, target.id))}>{location.id === target.id ? 'Открыть дневник' : `Дальше: ${locations[getNextLocation(location.id, target.id)].title}`} <ChevronRight size={16} /></button></div> : <div className="empty-task"><CircleGauge size={24} /><b>Найдите рабочее место</b><p>Пройдите по этажу в помещение, указанное в текущей задаче.</p></div>}
-          <div className="workers"><span><Users size={16} /> РЯДОМ</span><div><i>МК</i><i>СП</i><i>АВ</i><b>+4</b></div></div>
+          {job ? <div className="active-task"><span className="live-line"><i /> ВАША РАБОТА</span><b>{job.title}</b><p>{progress} из {job.target} · место: {target.title}</p><button onClick={() => location.id === target.id ? navigate('journal') : enter(getNextLocation(location.id, target.id))}>{location.id === target.id ? 'Открыть дневник' : `Дальше: ${locations[getNextLocation(location.id, target.id)].title}`} <ChevronRight size={16} /></button></div> : work ? <div className="empty-task"><CircleGauge size={24} /><b>{work.title}</b><p>Ближайшее доступное направление находится в помещении «{target.title}».</p></div> : <div className="empty-task"><Check size={24} /><b>Нет открытых работ</b><p>Проверьте общую цель и решения Заводского вече.</p></div>}
+          <div className="workers"><span><Users size={16} /> ОБЩАЯ СЕТЬ</span><p>{episode.mode === 'shared' ? 'Результаты других работников поступают с общего сервера.' : 'Локальная демонстрация: общий вклад не синхронизируется.'}</p></div>
         </aside>
       </div>
     </div>
   )
 }
 
-function Objectives({ state, job, progress, episodeWorkUnits, operationProgress, setState, navigate }: { state: SavedState, job: Job | null, progress: number, episodeWorkUnits: number, operationProgress: number, setState: React.Dispatch<React.SetStateAction<SavedState>>, navigate: (s: Screen) => void }) {
-  const activeMissionIndex = Math.min(episodeMissions.length - 1, Math.floor(episodeWorkUnits / MISSION_WORK_UNITS))
-  const activePackageIndex = Math.min(3, Math.floor((episodeWorkUnits % MISSION_WORK_UNITS) / PACKAGE_WORK_UNITS))
-  const [expandedMission, setExpandedMission] = useState(activeMissionIndex)
-  useEffect(() => setExpandedMission(activeMissionIndex), [activeMissionIndex])
-  const activeMission = episodeMissions[activeMissionIndex]
-  const activePackage = activeMission.packages[activePackageIndex]
-  const remainingUnits = Math.max(0, EPISODE_WORK_UNITS - episodeWorkUnits)
-  const episodeComplete = episodeWorkUnits >= EPISODE_WORK_UNITS
-  const segmentProgress = (start: number, size: number) => Math.max(0, Math.min(100, Math.round((episodeWorkUnits - start) / size * 100)))
-  const currentOrder = episodeComplete ? 6 : Math.floor((episodeWorkUnits % PACKAGE_WORK_UNITS) / ORDER_WORK_UNITS) + 1
-
-  const levels = [
-    { label: 'МАЛОЕ ЗАДАНИЕ', title: job ? job.title : 'Начать первую задачу', value: job ? Math.round(progress / job.target * 100) : 0, meta: '1 действие в минуту' },
-    { label: 'СРЕДНИЙ ЭТАП', title: episodeComplete ? 'Все этапы завершены' : activePackage.title, value: episodeComplete ? 100 : segmentProgress(activeMissionIndex * MISSION_WORK_UNITS + activePackageIndex * PACKAGE_WORK_UNITS, PACKAGE_WORK_UNITS), meta: `${currentOrder} из 6 задач` },
-    { label: 'БОЛЬШАЯ МИССИЯ', title: episodeComplete ? episodeMissions[2].title : activeMission.title, value: episodeComplete ? 100 : segmentProgress(activeMissionIndex * MISSION_WORK_UNITS, MISSION_WORK_UNITS), meta: episodeComplete ? '4 из 4 этапов' : `${activePackageIndex + 1} из 4 этапов` },
-    { label: 'ЭПИЗОД', title: 'Немой лифт', value: operationProgress, meta: episodeComplete ? 'сюжет завершён' : `осталось ≈ ${formatLongDuration(remainingUnits * 60)}` },
-  ]
-
+function Objectives({ state, job, progress, episode, works, council, busy, vote, resolveDemo, setState, navigate }: { state: SavedState, job: Job | null, progress: number, episode: EpisodeSnapshot, works: WorkView[], council: CouncilView | null, busy: boolean, vote: (voteId: string, optionId: string) => Promise<unknown>, resolveDemo: (() => Promise<unknown>) | null, setState: React.Dispatch<React.SetStateAction<SavedState>>, navigate: (s: Screen) => void }) {
+  const [choice, setChoice] = useState(council?.ownOptionId ?? '')
+  const [clock, setClock] = useState(Date.now())
+  useEffect(() => { const timer = window.setInterval(() => setClock(Date.now()), 1000); return () => clearInterval(timer) }, [])
+  useEffect(() => setChoice(council?.ownOptionId ?? ''), [council?.ownOptionId])
+  const actionable = works.filter(work => work.status !== 'completed').slice(0, 3)
+  const activeWork = works.find(work => work.id === job?.id) ?? actionable[0] ?? null
+  const remaining = council?.status === 'open' ? Math.max(0, Math.floor((Date.parse(council.closesAt) - clock) / 1000)) : 0
+  const goToWork = (work: WorkView) => {
+    const target = getWorkstation(work.id)
+    const next = getNextLocation(state.location, target.id)
+    setState(prev => ({ ...prev, location: next, department: work.department, screen: 'floor' }))
+  }
+  const submitVote = () => { if (council && choice) vote(council.id, choice).catch(() => undefined) }
   return <div className="content-screen objectives-screen">
-    <button className="back-button" onClick={() => navigate('floor')}><ArrowLeft size={17} /> НА ЭТАЖ</button>
-    <div className="screen-heading compact"><div><span className="eyebrow"><span /> ЭПИЗОД 01 · 24 ЧАСА СОЛО</span><h1>План операции</h1><p>Минута работы закрывает действие. 20 действий решают конкретную задачу, 6 задач завершают этап, 4 этапа — сюжетную миссию.</p></div><div className="objective-total"><span>{episodeComplete ? 'ЭПИЗОД ЗАВЕРШЁН' : 'ОБЩИЙ ПРОГРЕСС'}</span><b>{operationProgress}%</b><div><i style={{ width: `${operationProgress}%` }} /></div></div></div>
+    <button className="back-button" onClick={() => navigate('floor')}><ArrowLeft size={17} /> К ТЕКУЩЕЙ ЛОКАЦИИ</button>
+    <div className="screen-heading compact"><div><span className="eyebrow"><span /> ЭПИЗОД 01 · ОБЩЕЕ СОСТОЯНИЕ</span><h1>{episode.goal}</h1><p>{episode.goalDetail}</p></div><div className="objective-total"><span>ИЗВЕСТНО ЗАВОДУ</span><b>{episode.publicFacts.length}</b><small>фактов · версия мира {episode.version}</small></div></div>
+    <CurrentDirective state={state} job={job} work={activeWork} progress={progress} episode={episode} setState={setState} navigate={navigate} />
 
-    <CurrentDirective state={state} job={job} progress={progress} episodeWorkUnits={episodeWorkUnits} setState={setState} navigate={navigate} />
-    {job && <StoryPassage state={state} episodeWorkUnits={episodeWorkUnits} />}
+    {council && <section className={`council-card ${council.status}`}>
+      <div className="council-heading"><span><Users size={18} /> ЗАВОДСКОЕ ВЕЧЕ</span><b>{council.status === 'open' ? `ОСТАЛОСЬ ${formatCouncilDuration(remaining)}` : 'РЕШЕНИЕ ПРИНЯТО'}</b></div>
+      <h2>{council.question}</h2><p>{council.context}</p>
+      {council.status === 'open' ? <>
+        <div className="council-options" role="radiogroup" aria-label="Варианты решения">{council.options.map(option => <button role="radio" aria-checked={choice === option.id} className={choice === option.id ? 'selected' : ''} key={option.id} onClick={() => setChoice(option.id)}><span className="radio-mark">{choice === option.id && <i />}</span><span><b>{option.title}</b><small>{option.argument}</small></span></button>)}</div>
+        <div className="council-actions"><button className="primary-button" disabled={!choice || busy} onClick={submitVote}>{council.ownOptionId ? 'ИЗМЕНИТЬ СВОЙ ГОЛОС' : 'ПОДАТЬ ГОЛОС'} <ArrowRight size={17} /></button>{episode.mode === 'local-demo' && resolveDemo && <button className="demo-resolve" onClick={() => resolveDemo().catch(() => undefined)}>ЗАВЕРШИТЬ ДЕМО-ВЕЧЕ</button>}</div>
+        <small className="council-rule"><Clock3 size={14} /> Один аккаунт — один равный голос. Его можно изменить до срока. Числа скрыты до закрытия; кворума нет. При ничьей действует безопасный вариант.</small>
+      </> : <div className="council-result"><Check size={22} /><span><b>{council.options.find(option => option.id === council.resultOptionId)?.title}</b><small>Итог применён к состоянию мира и списку доступных работ.</small></span></div>}
+    </section>}
 
-    <section className="progress-hierarchy">
-      {levels.map((level, index) => <article key={level.label} className={index === 3 && episodeComplete ? 'complete' : ''}><span>{String(index + 1).padStart(2, '0')}</span><div><small>{level.label}</small><b>{level.title}</b><em>{level.meta}</em><div><i style={{ width: `${level.value}%` }} /></div></div><strong>{level.value}%</strong></article>)}
-    </section>
+    <section className="known-facts"><div className="section-kicker">ПОДТВЕРЖДЁННЫЕ СВЕДЕНИЯ <span>{episode.publicFacts.length}</span></div>{episode.publicFacts.length ? <div className="fact-grid">{episode.publicFacts.map(fact => <article key={fact.id} className={fact.certainty}><span>{fact.certainty === 'confirmed' ? 'ПОДТВЕРЖДЕНО' : fact.certainty === 'refuted' ? 'ОПРОВЕРГНУТО' : 'ГИПОТЕЗА'}</span><h3>{fact.title}</h3><p>{fact.text}</p></article>)}</div> : <div className="objective-empty"><Info /><p>Причины остановки ещё не подтверждены. Первые независимые работы доступны в разных отсеках.</p></div>}</section>
 
-    <div className="mission-tree">
-      {episodeMissions.map((mission, missionIndex) => {
-        const missionStart = missionIndex * MISSION_WORK_UNITS
-        const missionProgress = segmentProgress(missionStart, MISSION_WORK_UNITS)
-        const status = missionProgress >= 100 ? 'done' : episodeWorkUnits >= missionStart && episodeWorkUnits < missionStart + MISSION_WORK_UNITS && job ? 'active' : 'locked'
-        const expanded = expandedMission === missionIndex
-        return <section className={`mission-card ${status}`} key={mission.code}>
-          <button className="mission-header" onClick={() => setExpandedMission(expanded ? -1 : missionIndex)} aria-expanded={expanded}>
-            <span className="mission-code">{status === 'done' ? <Check size={18} /> : mission.code}</span>
-            <span><small>{status === 'done' ? 'МИССИЯ ЗАВЕРШЕНА' : status === 'active' ? 'ТЕКУЩАЯ МИССИЯ' : 'ОТКРОЕТСЯ ПОСЛЕ ПРЕДЫДУЩЕЙ'}</small><b>{mission.title}</b><em>{mission.story}</em></span>
-            <strong>{missionProgress}%</strong><ChevronRight size={19} />
-          </button>
-          {expanded && <div className="package-list">{mission.packages.map((workPackage, packageIndex) => {
-            const packageStart = missionStart + packageIndex * PACKAGE_WORK_UNITS
-            const packageProgress = segmentProgress(packageStart, PACKAGE_WORK_UNITS)
-            const packageStatus = packageProgress >= 100 ? 'done' : packageProgress > 0 || (episodeWorkUnits === packageStart && job) ? 'active' : 'locked'
-            return <article className={`package-card ${packageStatus}`} key={workPackage.title}>
-              <div className="package-heading"><span>{packageStatus === 'done' ? <Check size={15} /> : `${missionIndex + 1}.${packageIndex + 1}`}</span><div><small>{departments[workPackage.department].label.toUpperCase()} · ЭТАП ≈2 ЧАСА</small><b>{workPackage.title}</b></div><strong>{packageProgress}%</strong></div>
-              <p className="package-purpose">{workPackage.purpose}</p>
-              <div className="order-chain">{Array.from({ length: 6 }, (_, orderIndex) => {
-                const orderStart = packageStart + orderIndex * ORDER_WORK_UNITS
-                const orderStatus = episodeWorkUnits >= orderStart + ORDER_WORK_UNITS ? 'done' : episodeWorkUnits >= orderStart && episodeWorkUnits < orderStart + ORDER_WORK_UNITS && job ? 'active' : 'locked'
-                return <span className={orderStatus} key={orderIndex} title={workPackage.tasks[orderIndex]}>{orderStatus === 'done' ? <Check size={12} /> : String(orderIndex + 1).padStart(2, '0')}</span>
-              })}</div>
-              <ol className="story-task-list">{workPackage.tasks.map((task, orderIndex) => {
-                const orderStart = packageStart + orderIndex * ORDER_WORK_UNITS
-                const orderStatus = episodeWorkUnits >= orderStart + ORDER_WORK_UNITS ? 'done' : episodeWorkUnits >= orderStart && episodeWorkUnits < orderStart + ORDER_WORK_UNITS && job ? 'active' : 'locked'
-                return <li className={orderStatus} key={task}><span>{orderStatus === 'done' ? <Check size={12} /> : String(orderIndex + 1).padStart(2, '0')}</span>{task}</li>
-              })}</ol>
-              <div className="package-progress"><i style={{ width: `${packageProgress}%` }} /></div>
-            </article>
-          })}</div>}
-        </section>
-      })}
-    </div>
-
-    {episodeComplete && <section className="episode-finale"><Check size={34} /><div><span>ЭПИЗОД 01 ЗАКРЫТ</span><h2>Грузовой лифт снова работает</h2><p>Ярус 47 восстановил снабжение верхних секторов. Ваши решения и освоенные знания сохранены в летописи.</p></div><button onClick={() => navigate('chronicle')}>ОТКРЫТЬ ЛЕТОПИСЬ <ChevronRight size={17} /></button></section>}
-
-    <aside className="objective-hint"><Info size={19} /><div><b>Прогресс продолжается после выхода.</b><p>Смена экрана или рабочего места не сбрасывает задачу, этап, миссию и Эпизод. Полное одиночное прохождение занимает около 24 часов активной смены.</p></div></aside>
+    <section className="available-directions"><div className="section-kicker">ДОСТУПНЫЕ НАПРАВЛЕНИЯ <span>{actionable.length}</span></div><div className="direction-grid">{actionable.map(work => <article key={work.id} className={work.status === 'locked_skill' ? 'locked' : ''}><span>{locations[work.location as LocationId]?.code ?? work.location}</span><h3>{work.title}</h3><p>{work.description}</p><div><small>БЛИЖАЙШИЙ РЕЗУЛЬТАТ</small><b>{work.nearestResult}</b></div><em>{work.progress} / {work.requiredProgress} общего вклада · навык {work.skill.level}</em><button disabled={work.status === 'locked_skill'} onClick={() => goToWork(work)}>{work.status === 'locked_skill' ? `НУЖЕН УРОВЕНЬ ${work.skill.level}` : 'ПОКАЗАТЬ МАРШРУТ'} <ChevronRight size={16} /></button></article>)}</div>{!actionable.length && <div className="objective-empty"><Check /><p>{episode.status === 'complete' ? 'Эпизод завершён. Итог сохранён в летописи.' : 'Новые работы появятся после публикации результата или решения вече.'}</p></div>}</section>
   </div>
 }
 
-function Jobs({ department, location, assignmentJob, activeJob, episodeWorkUnits, beginJob, continueJob, back }: { department: Department, location: LocationDefinition, assignmentJob: Job, activeJob: Job | null, episodeWorkUnits: number, beginJob: (j: Job) => void, continueJob: () => void, back: () => void }) {
+function Jobs({ location, works, activeWork, beginJob, continueJob, back }: { location: LocationDefinition, works: WorkView[], activeWork: WorkView | null, beginJob: (work: WorkView) => void, continueJob: () => void, back: () => void }) {
   const [filter, setFilter] = useState<'available' | 'active' | 'completed'>('available')
-  const assignment = getStoryAssignment(episodeWorkUnits)
-  const available = assignmentJob.department === department && !assignment.complete ? [assignmentJob] : []
-  const active = activeJob?.department === department ? [activeJob] : []
-  const visibleJobs = filter === 'available' ? available : filter === 'active' ? active : []
-  const completedCount = Math.floor(episodeWorkUnits / ORDER_WORK_UNITS)
-  const taskProgress = assignment.complete ? 100 : Math.round((episodeWorkUnits % ORDER_WORK_UNITS) / ORDER_WORK_UNITS * 100)
-  return (
-    <div className="content-screen jobs-screen">
-      <button className="back-button" onClick={back}><ArrowLeft size={17} /> НАЗАД НА ЭТАЖ</button>
-      <div className="screen-heading compact"><div><span className="eyebrow"><span /> {location.code} · СЮЖЕТНАЯ ЗАДАЧА</span><h1>{location.title}</h1><p>Вы дошли до нужного помещения. Здесь можно занять рабочее место и начать задачу.</p></div><div className="station-badge">{department === 'mechanics' ? <Cog size={40} /> : department === 'power' ? <Zap size={40} /> : <Wrench size={40} />}<span><b>{departments[department].short}</b><small>ОБОРУДОВАНИЕ ИСПРАВНО</small></span></div></div>
-      <div className="job-filter" role="tablist" aria-label="Фильтр задач">
-        <button className={filter === 'available' ? 'active' : ''} onClick={() => setFilter('available')} role="tab" aria-selected={filter === 'available'}>ДОСТУПНЫЕ <span>{available.length}</span></button>
-        <button className={filter === 'active' ? 'active' : ''} onClick={() => setFilter('active')} role="tab" aria-selected={filter === 'active'}>В РАБОТЕ <span>{active.length}</span></button>
-        <button className={filter === 'completed' ? 'active' : ''} onClick={() => setFilter('completed')} role="tab" aria-selected={filter === 'completed'}>ЗАВЕРШЕНЫ <span>{completedCount}</span></button>
-      </div>
-      <div className="job-grid">
-        {visibleJobs.map(item => {
-          const isActive = Boolean(activeJob && activeJob.title === item.title)
-          return <article className={`job-card story-job ${isActive ? 'selected' : ''}`} key={item.title}>
-            <div className="job-icon">{item.icon === 'power' ? <Zap /> : item.icon === 'repair' ? <Wrench /> : <Cog />}</div>
-            <div className="job-copy"><span className="job-code">ЗАДАЧА {assignment.missionIndex + 1}.{assignment.packageIndex + 1}.{assignment.taskIndex + 1}</span><h3>{item.title}</h3><p>{item.description}</p><div className="job-chain"><span>НУЖНА ДЛЯ</span><b>{assignment.workPackage.title}</b><i /><b>{assignment.mission.title}</b><i /><b>Цель Эпизода: запустить лифт</b></div><div className="job-meta"><span><Clock3 size={14} /> ≈20 минут</span><span><Sparkles size={14} /> +20 XP</span></div></div>
-            <div className="job-progress-mini"><span>{isActive ? 'ТЕКУЩАЯ ЗАДАЧА' : 'НЕОБХОДИМА ДЛЯ ПРОДОЛЖЕНИЯ СЮЖЕТА'}</span><div><i style={{ width: isActive ? `${taskProgress}%` : '0%' }} /></div></div>
-            <button onClick={() => isActive ? continueJob() : beginJob(item)}>{isActive ? 'ПРОДОЛЖИТЬ ЗАДАЧУ' : 'НАЧАТЬ ЗАДАЧУ'} <ChevronRight size={17} /></button>
-          </article>
-        })}
-        {filter === 'completed' && <div className="job-list-empty"><Check size={30} /><h3>Завершено задач: {completedCount}</h3><p>Каждые шесть задач закрывают производственный этап. Подробная цепочка сохранена в плане операции.</p></div>}
-        {filter !== 'completed' && visibleJobs.length === 0 && <div className="job-list-empty"><CircleGauge size={30} /><h3>{assignment.complete ? 'Эпизод завершён' : `Задача находится в отсеке «${departments[assignmentJob.department].label}»`}</h3><p>{assignment.complete ? 'Все задачи выполнены. Итог операции записан в летописи.' : `Для этапа «${assignment.workPackage.title}» сейчас необходимо: «${assignment.task}». Перейдите к нужному рабочему месту на этаже.`}</p></div>}
-      </div>
-      <div className="job-note"><Info size={18} /><span><b>Задачи открываются последовательно.</b> Выполненная работа закрывает текущий этап, открывает следующий и двигает сюжет Эпизода.</span></div>
-    </div>
-  )
+  const available = works.filter(work => ['available', 'locked_skill'].includes(work.status))
+  const active = works.filter(work => work.status === 'active' || work.id === activeWork?.id)
+  const completed = works.filter(work => work.status === 'completed')
+  const visible = filter === 'available' ? available : filter === 'active' ? active : completed
+  const Icon = location.icon
+  return <div className="content-screen jobs-screen">
+    <button className="back-button" onClick={back}><ArrowLeft size={17} /> НАЗАД В ПОМЕЩЕНИЕ</button>
+    <div className="screen-heading compact"><div><span className="eyebrow"><span /> {location.code} · ДОСТУПНЫЕ РАБОТЫ</span><h1>{location.title}</h1><p>Показаны только работы, уже открытые общими знаниями. Скрытые ветви и будущие исходы не раскрываются.</p></div><div className="station-badge"><Icon size={40} /><span><b>{location.title}</b><small>РАБОЧЕЕ МЕСТО ДОСТУПНО</small></span></div></div>
+    <div className="job-filter" role="tablist" aria-label="Фильтр работ"><button className={filter === 'available' ? 'active' : ''} onClick={() => setFilter('available')}>ДОСТУПНЫЕ <span>{available.length}</span></button><button className={filter === 'active' ? 'active' : ''} onClick={() => setFilter('active')}>В РАБОТЕ <span>{active.length}</span></button><button className={filter === 'completed' ? 'active' : ''} onClick={() => setFilter('completed')}>ЗАВЕРШЕНЫ <span>{completed.length}</span></button></div>
+    <div className="job-grid">{visible.map(work => {
+      const isActive = work.id === activeWork?.id
+      return <article className={`job-card story-job ${isActive ? 'selected' : ''} ${work.status === 'locked_skill' ? 'locked' : ''}`} key={work.id}>
+        <div className="job-icon">{work.department === 'power' ? <Zap /> : work.department === 'repair' ? <Wrench /> : <Cog />}</div>
+        <div className="job-copy"><span className="job-code">{work.significance === 'routine' ? 'РАБОЧИЙ НАРЯД' : 'СЮЖЕТНАЯ РАБОТА'} · {locations[work.location as LocationId]?.code}</span><h3>{work.title}</h3><p>{work.description}</p><div className="job-chain"><span>БЛИЖАЙШИЙ РЕЗУЛЬТАТ</span><b>{work.nearestResult}</b></div><div className="job-meta"><span><Clock3 size={14} /> {work.requiredProgress} действий</span><span><Sparkles size={14} /> Навык {work.skill.level}</span><span><Users size={14} /> Ваш вклад {work.playerContribution}</span></div></div>
+        <div className="job-progress-mini"><span>{work.status === 'completed' ? 'РАБОТА ЗАВЕРШЕНА' : `${work.progress} / ${work.requiredProgress} ОБЩЕГО ВКЛАДА`}</span><div><i style={{ width: `${Math.round(work.progress / work.requiredProgress * 100)}%` }} /></div></div>
+        <button disabled={work.status === 'locked_skill' || work.status === 'completed'} onClick={() => isActive ? continueJob() : beginJob(work)}>{work.status === 'locked_skill' ? `НУЖЕН УРОВЕНЬ ${work.skill.level}` : work.status === 'completed' ? 'РЕЗУЛЬТАТ ОПУБЛИКОВАН' : isActive ? 'ПРОДОЛЖИТЬ РАБОТУ' : 'НАЧАТЬ РАБОТУ'} <ChevronRight size={17} /></button>
+      </article>
+    })}{visible.length === 0 && <div className="job-list-empty"><CircleGauge size={30} /><h3>Здесь пока нет работ</h3><p>Доступность меняется после подтверждённых результатов и решений Заводского вече. Проверьте общую сводку.</p></div>}</div>
+    <div className="job-note"><Info size={18} /><span><b>Будущий путь скрыт.</b> Работа сообщает ближайший практический результат; новые возможности появляются только после его фиксации.</span></div>
+  </div>
 }
 
-function Journal({ state, job, progress, episodeWorkUnits, elapsed, navigate }: { state: SavedState, job: Job | null, progress: number, episodeWorkUnits: number, elapsed: number, navigate: (s: Screen) => void }) {
+function Journal({ state, job, work, progress, elapsed, navigate }: { state: SavedState, job: Job | null, work: WorkView | null, progress: number, elapsed: number, navigate: (s: Screen) => void }) {
   const time = (timestamp: number | null) => new Date(timestamp ?? Date.now()).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
-  const completedCycles = Math.min(EPISODE_WORK_UNITS, Math.floor(elapsed / 60))
+  const completedCycles = state.contributionCycle
   type JournalEntry =
     | { kind: 'start', timestamp: number, order: number }
     | { kind: 'cycle', timestamp: number, order: number, cycle: number }
-    | { kind: 'task', timestamp: number, order: number, taskNumber: number }
     | { kind: 'incident', timestamp: number, order: number, eventId: string, active: boolean }
     | { kind: 'resolution', timestamp: number, order: number, record: IncidentRecord }
   const entries: JournalEntry[] = []
   if (job && state.jobStartedAt) {
     entries.push({ kind: 'start', timestamp: state.jobStartedAt, order: 0 })
     const firstVisibleCycle = Math.max(0, completedCycles - 20)
-    for (let cycle = firstVisibleCycle; cycle < completedCycles; cycle += 1) {
-      entries.push({ kind: 'cycle', timestamp: state.jobStartedAt + (cycle + 1) * 60_000, order: 1, cycle })
-    }
-  }
-  if (state.episodeStartedAt) {
-    const completedTasks = Math.min(72, Math.floor(episodeWorkUnits / ORDER_WORK_UNITS))
-    for (let taskNumber = 0; taskNumber < completedTasks; taskNumber += 1) {
-      entries.push({ kind: 'task', timestamp: state.episodeStartedAt + (taskNumber + 1) * ORDER_WORK_UNITS * 60_000, order: 2, taskNumber })
-    }
+    for (let cycle = firstVisibleCycle; cycle < completedCycles; cycle += 1) entries.push({ kind: 'cycle', timestamp: state.jobStartedAt + (cycle + 1) * 60_000, order: 1, cycle })
   }
   state.incidentHistory.forEach(record => {
     entries.push({ kind: 'incident', timestamp: record.createdAt, order: 3, eventId: record.eventId, active: false })
     entries.push({ kind: 'resolution', timestamp: record.resolvedAt, order: 4, record })
   })
   if (state.activeIncidentId && state.activeIncidentCreatedAt) entries.push({ kind: 'incident', timestamp: state.activeIncidentCreatedAt, order: 3, eventId: state.activeIncidentId, active: true })
-  entries.sort((a, b) => a.timestamp - b.timestamp || a.order - b.order)
-
-  return (
-    <div className="content-screen journal-screen">
-      <div className="screen-heading compact"><div><span className="eyebrow"><span /> ЛИЧНЫЙ ЖУРНАЛ · {state.name.toUpperCase()}</span><h1>Рабочий дневник</h1><p>Записи смены идут от ранних событий к поздним.</p></div>{job && <div className="working-now"><span><i /> РАБОТА ИДЁТ</span><b>{job.title}</b><small>{progress} / {job.target} · {formatDuration(elapsed)}</small></div>}</div>
-      {job && <ActionProgress job={job} elapsed={elapsed} />}
-      <div className="journal-layout">
-        <div className="timeline">
-          {!job && <div className="journal-empty"><BookOpen size={28} /><h3>История ещё не началась</h3><p>Откройте план и начните первую конкретную задачу. Здесь будут появляться её результат и связь со следующими этапами.</p><button onClick={() => navigate('objectives')}>ОТКРЫТЬ ПЛАН ОПЕРАЦИИ <ChevronRight size={16} /></button></div>}
-          {job && entries.map(entry => {
-            if (entry.kind === 'start') {
-              const firstAssignment = getStoryAssignment(0)
-              return <div className="timeline-event" key={`start-${entry.timestamp}`}><time>{time(entry.timestamp)}</time><span className="timeline-dot" /><div><span className="entry-type">НАЧАЛО ЭПИЗОДА</span><p>Я начал задачу «{firstAssignment.task}». Она нужна для этапа «{firstAssignment.workPackage.title}» и миссии «{firstAssignment.mission.title}».</p></div></div>
-            }
-            if (entry.kind === 'cycle') {
-              const action = getWorkAction(job, entry.cycle)
-              return <div className="timeline-event" key={`cycle-${entry.cycle}`}><time>{time(entry.timestamp)}</time><span className="timeline-dot" /><div><span className="entry-type">РАБОЧИЙ ЦИКЛ {String(entry.cycle + 1).padStart(2, '0')}</span><p>{action.completed}</p><small>+1 XP · +1 к прогрессу задачи</small></div></div>
-            }
-            if (entry.kind === 'task') {
-              const completedAssignment = getStoryAssignment(entry.taskNumber * ORDER_WORK_UNITS)
-              return <div className="timeline-event task-complete-entry" key={`task-${entry.taskNumber}`}><time>{time(entry.timestamp)}</time><span className="timeline-dot success" /><div><span className="entry-type">ЗАДАЧА {completedAssignment.missionIndex + 1}.{completedAssignment.packageIndex + 1}.{completedAssignment.taskIndex + 1} ЗАВЕРШЕНА</span><h3>{completedAssignment.task}</h3><p>Результат передан в этап «{completedAssignment.workPackage.title}», необходимый для миссии «{completedAssignment.mission.title}».</p></div></div>
-            }
-            if (entry.kind === 'incident') {
-              const incident = getIncident(entry.eventId)
-              if (entry.active) return <button className="timeline-event incident-entry" key={`incident-${entry.timestamp}`} onClick={() => navigate('incident')}><time>{time(entry.timestamp)}</time><span className="timeline-dot danger" /><div><span className="entry-type">АКТИВНОЕ ПРОИСШЕСТВИЕ</span><h3>{incident?.title}</h3><p>{incident?.summary}</p><b>ПРИНЯТЬ РЕШЕНИЕ <ChevronRight size={15} /></b></div></button>
-              return <div className="timeline-event incident-entry" key={`incident-${entry.timestamp}`}><time>{time(entry.timestamp)}</time><span className="timeline-dot danger" /><div><span className="entry-type">ПРОИСШЕСТВИЕ · {incident?.sector}</span><h3>{incident?.title}</h3><p>{incident?.summary}</p></div></div>
-            }
-            const incident = getIncident(entry.record.eventId)
-            return <div className="timeline-event resolved-entry" key={`resolution-${entry.timestamp}-${entry.record.eventId}`}><time>{time(entry.timestamp)}</time><span className="timeline-dot success" /><div><span className="entry-type">РЕШЕНИЕ ЗАФИКСИРОВАНО · {incident?.title}</span><h3>{entry.record.choice}</h3><p>Выбор внесён в личную историю. Его значение может проявиться на следующих страницах Эпизода.</p></div></div>
-          })}
-        </div>
-        <aside className="shift-summary"><span className="rail-label">СВОДКА СМЕНЫ</span><div className="summary-number"><b>{progress}</b><span>ЕДИНИЦ<br />ПРОИЗВЕДЕНО</span></div><div className="summary-stats"><p><span>Опыт</span><b>+{Math.floor(elapsed / 60) + state.incidentXpBonus} XP</b></p><p><span>Время</span><b>{formatDuration(elapsed)}</b></p><p><span>Происшествия</span><b>{state.incidentHistory.length + (state.activeIncidentId ? 1 : 0)}</b></p></div><button onClick={() => navigate('floor')}>ВЕРНУТЬСЯ НА ЭТАЖ</button></aside>
-      </div>
-    </div>
-  )
+  entries.sort((left, right) => left.timestamp - right.timestamp || left.order - right.order)
+  return <div className="content-screen journal-screen">
+    <div className="screen-heading compact"><div><span className="eyebrow"><span /> ЛИЧНЫЙ ЖУРНАЛ · {state.name.toUpperCase()}</span><h1>Рабочий дневник</h1><p>Здесь остаются ваши действия и происшествия. Общая летопись получает только значимые результаты.</p></div>{job && <div className="working-now"><span><i /> РАБОТА ИДЁТ</span><b>{job.title}</b><small>{progress} / {job.target} общего вклада · {formatDuration(elapsed)}</small></div>}</div>
+    {job && <ActionProgress job={job} elapsed={elapsed} />}
+    <div className="journal-layout"><div className="timeline">
+      {!job && <div className="journal-empty"><BookOpen size={28} /><h3>Сейчас нет активной работы</h3><p>Выберите одно из доступных направлений в общей сводке и дойдите до указанного рабочего места.</p><button onClick={() => navigate('objectives')}>ОТКРЫТЬ ОБЩУЮ СВОДКУ <ChevronRight size={16} /></button></div>}
+      {entries.map(entry => {
+        if (entry.kind === 'start') return <div className="timeline-event" key={`start-${entry.timestamp}`}><time>{time(entry.timestamp)}</time><span className="timeline-dot" /><div><span className="entry-type">РАБОТА НАЧАТА</span><h3>{work?.title ?? job?.title}</h3><p>{work?.description}</p><small>Ближайший результат: {work?.nearestResult}</small></div></div>
+        if (entry.kind === 'cycle') { const action = job ? getWorkAction(job, entry.cycle) : null; return <div className="timeline-event" key={`cycle-${entry.cycle}`}><time>{time(entry.timestamp)}</time><span className="timeline-dot" /><div><span className="entry-type">ВКЛАД {String(entry.cycle + 1).padStart(2, '0')}</span><p>{action?.completed}</p><small>+1 XP · +1 к общему результату работы</small></div></div> }
+        if (entry.kind === 'incident') {
+          const incident = getIncident(entry.eventId)
+          if (entry.active) return <button className="timeline-event incident-entry" key={`incident-${entry.timestamp}`} onClick={() => navigate('incident')}><time>{time(entry.timestamp)}</time><span className="timeline-dot danger" /><div><span className="entry-type">АКТИВНОЕ ПРОИСШЕСТВИЕ</span><h3>{incident?.title}</h3><p>{incident?.summary}</p><b>ПРИНЯТЬ РЕШЕНИЕ <ChevronRight size={15} /></b></div></button>
+          return <div className="timeline-event incident-entry" key={`incident-${entry.timestamp}`}><time>{time(entry.timestamp)}</time><span className="timeline-dot danger" /><div><span className="entry-type">ПРОИСШЕСТВИЕ · {incident?.sector}</span><h3>{incident?.title}</h3><p>{incident?.summary}</p></div></div>
+        }
+        const incident = getIncident(entry.record.eventId)
+        return <div className="timeline-event resolved-entry" key={`resolution-${entry.timestamp}-${entry.record.eventId}`}><time>{time(entry.timestamp)}</time><span className="timeline-dot success" /><div><span className="entry-type">РЕШЕНИЕ ЗАФИКСИРОВАНО · {incident?.title}</span><h3>{entry.record.choice}</h3><p>Выбор сохранён в личной истории. Рядовое происшествие не создаёт отдельную большую главу.</p></div></div>
+      })}
+    </div><aside className="shift-summary"><span className="rail-label">ЛИЧНЫЙ ВКЛАД</span><div className="summary-number"><b>{work?.playerContribution ?? 0}</b><span>ДЕЙСТВИЙ<br />В РАБОТЕ</span></div><div className="summary-stats"><p><span>Опыт смены</span><b>+{state.contributionCycle + state.incidentXpBonus} XP</b></p><p><span>Время</span><b>{formatDuration(elapsed)}</b></p><p><span>Происшествия</span><b>{state.incidentHistory.length + (state.activeIncidentId ? 1 : 0)}</b></p></div><button onClick={() => navigate('floor')}>ВЕРНУТЬСЯ В ЛОКАЦИЮ</button></aside></div>
+  </div>
 }
 
 function Incident({ state, setState, navigate, remaining }: { state: SavedState, setState: React.Dispatch<React.SetStateAction<SavedState>>, navigate: (s: Screen) => void, remaining: number }) {
@@ -1057,68 +1014,72 @@ function Incident({ state, setState, navigate, remaining }: { state: SavedState,
       <aside className="decision-mechanics"><Info size={17} /><span><b>Решение необратимо</b> Оно останется в дневнике и может отразиться в следующих страницах истории.</span></aside>
       <div className="decision-options">{incident.options.map(({ title, text, icon: Icon }) => <button key={title} className={choice === title ? 'selected' : ''} onClick={() => setChoice(title)}><span className="decision-icon"><Icon /></span><span><b>{title}</b><small>{text}</small></span><span className="radio-mark">{choice === title && <i />}</span></button>)}</div>
       <button className="primary-button decision-confirm" disabled={!choice} onClick={confirm}>ПОДТВЕРДИТЬ РЕШЕНИЕ <ArrowRight size={18} /></button>
-      <p className="fallback-note"><Info size={15} /> Если время истечёт, система автоматически выберет «{incident.options[0].title}».</p>
+      <p className="fallback-note"><Info size={15} /> Если время истечёт, система применит безопасный вариант «{incident.timeoutOptionId}».</p>
     </div>
   )
 }
 
-function Skills({ state, episodeWorkUnits }: { state: SavedState, episodeWorkUnits: number }) {
-  const xpFor = (department: Department) => {
-    let total = department === 'repair' ? state.incidentXpBonus : 0
-    episodeMissions.forEach((mission, missionIndex) => mission.packages.forEach((workPackage, packageIndex) => {
-      if (workPackage.department !== department) return
-      const start = missionIndex * MISSION_WORK_UNITS + packageIndex * PACKAGE_WORK_UNITS
-      total += Math.max(0, Math.min(PACKAGE_WORK_UNITS, episodeWorkUnits - start))
-    }))
-    return total
-  }
-  const makeSkill = (name: string, totalXp: number, icon: typeof Cog, color: string, note: string) => ({ name, level: Math.floor(totalXp / 60) + 1, xp: totalXp % 60, max: 60, icon, color, note })
-  const skillData = [
-    makeSkill('Механическая обработка', xpFor('mechanics'), Cog, 'orange', 'Точные детали, подшипники, крепёж'),
-    makeSkill('Энергетика', xpFor('power'), Zap, 'yellow', 'Силовые линии и накопители'),
-    makeSkill('Ремонт', xpFor('repair'), Wrench, 'blue', 'Диагностика и восстановление'),
-  ]
-  return <div className="content-screen skills-screen"><div className="screen-heading compact"><div><span className="eyebrow"><span /> ПРОФИЛЬ РАБОТНИКА</span><h1>Навыки</h1><p>{state.name} · прогресс текущего Эпизода</p></div><div className="episode-reset"><Info size={18} /><span><b>Прогресс Эпизода</b><small>Сохранится до следующего Эпизода</small></span></div></div><div className="skill-grid">{skillData.map(({ name, level, xp, max, icon: Icon, color, note }) => <article className="skill-card" key={name}><div className={`skill-symbol ${color}`}><Icon /></div><div className="skill-main"><span className="skill-level">УРОВЕНЬ {level}</span><h3>{name}</h3><p>{note}</p><div className="skill-bar"><i style={{ width: `${Math.min(100, xp / max * 100)}%` }} /></div><small>{xp} / {max} XP до следующего уровня</small></div></article>)}</div><section className="knowledge"><div className="section-kicker">ОСОБЫЕ ЗНАНИЯ <span>{state.incidentKnowledge.length ? `${state.incidentKnowledge.length} ОТКРЫТО` : 'ПОКА НЕТ'}</span></div>{state.incidentKnowledge.length ? <div className="knowledge-grid">{state.incidentKnowledge.map((knowledge, index) => <article key={knowledge}><Sparkles /><div><b>{knowledge}</b><p>Открыто решением во время происшествия.</p><span>ЛИЧНАЯ ЗАПИСЬ {String(index + 1).padStart(2, '0')}</span></div></article>)}</div> : <div className="knowledge-empty"><Sparkles /><p>Особые знания открываются некоторыми решениями во время происшествий.</p></div>}</section></div>
+function Skills({ state, player }: { state: SavedState, player: PlayerView }) {
+  const makeSkill = (id: Department, name: string, icon: typeof Cog, color: string, note: string) => { const skill = player.skills[id]; return { name, level: skill.level, xp: skill.xp % 20, max: 20, total: skill.xp, icon, color, note } }
+  const skillData = [makeSkill('mechanics', 'Механическая обработка', Cog, 'orange', 'Точные детали, подшипники, крепёж'), makeSkill('power', 'Энергетика', Zap, 'yellow', 'Силовые линии и накопители'), makeSkill('repair', 'Ремонт', Wrench, 'blue', 'Диагностика и восстановление')]
+  return <div className="content-screen skills-screen"><div className="screen-heading compact"><div><span className="eyebrow"><span /> ПРОФИЛЬ РАБОТНИКА</span><h1>Навыки</h1><p>{player.displayName} · навыки принадлежат человеку, а не отсеку</p></div><div className="episode-reset"><Info size={18} /><span><b>Свободный переход</b><small>Можно работать в любом отсеке при достаточном навыке</small></span></div></div><div className="skill-grid">{skillData.map(({ name, level, xp, max, total, icon: Icon, color, note }) => <article className="skill-card" key={name}><div className={`skill-symbol ${color}`}><Icon /></div><div className="skill-main"><span className="skill-level">УРОВЕНЬ {level}</span><h3>{name}</h3><p>{note} · всего {total} XP</p><div className="skill-bar"><i style={{ width: `${xp / max * 100}%` }} /></div><small>{xp} / {max} XP до следующего уровня</small></div></article>)}</div><section className="knowledge"><div className="section-kicker">ЛИЧНЫЕ ЗНАНИЯ ИЗ ПРОИСШЕСТВИЙ <span>{state.incidentKnowledge.length || 'ПОКА НЕТ'}</span></div>{state.incidentKnowledge.length ? <div className="knowledge-grid">{state.incidentKnowledge.map((knowledge, index) => <article key={knowledge}><Sparkles /><div><b>{knowledge}</b><p>Открыто личным решением во время происшествия.</p><span>ЛИЧНАЯ ЗАПИСЬ {String(index + 1).padStart(2, '0')}</span></div></article>)}</div> : <div className="knowledge-empty"><Sparkles /><p>Общие сюжетные факты находятся в сводке; здесь остаются личные знания.</p></div>}</section></div>
 }
 
-function DepartmentMap({ state, setState, navigate }: { state: SavedState, setState: React.Dispatch<React.SetStateAction<SavedState>>, navigate: (s: Screen) => void }) {
+function DepartmentMap({ state, setState, navigate, setRemoteLocation }: { state: SavedState, setState: React.Dispatch<React.SetStateAction<SavedState>>, navigate: (s: Screen) => void, setRemoteLocation: (location: string) => void }) {
   const wingByDepartment: Record<Department, LocationId> = { mechanics: 'production-wing', power: 'power-wing', repair: 'engineering-wing' }
-  return <div className="content-screen map-screen"><div className="screen-heading compact"><div><span className="eyebrow"><span /> ГРУЗОВОЙ ЛИФТ · ЯРУС 47</span><h1>Схема этажа</h1><p>Схема переносит ко входу в выбранное крыло. Внутри нужно самостоятельно найти нужную комнату.</p></div></div><div className="department-grid">{(Object.keys(departments) as Department[]).map(key => { const item = departments[key]; const Icon = item.icon; const wing = locations[wingByDepartment[key]]; return <button key={key} className={state.location === wing.id ? 'active' : ''} onClick={() => setState(prev => ({ ...prev, department: key, location: wing.id, screen: 'floor' }))}><div className={`department-illustration ${key}`}><Icon /><span className="floor-lines" /></div><div><span>{wing.code}</span><h2>{wing.title}</h2><p>{wing.subtitle}</p><small>{wing.children?.length} помещения · вход из центрального перехода</small></div><ChevronRight /></button>})}</div><button className="back-button centered" onClick={() => navigate('floor')}><ArrowLeft size={17} /> ВЕРНУТЬСЯ В ТЕКУЩУЮ ЛОКАЦИЮ</button></div>
+  return <div className="content-screen map-screen"><div className="screen-heading compact"><div><span className="eyebrow"><span /> ГРУЗОВОЙ ЛИФТ · ЯРУС 47</span><h1>Схема этажа</h1><p>Схема переносит ко входу в выбранное крыло. Внутри нужно самостоятельно найти нужную комнату.</p></div></div><div className="department-grid">{(Object.keys(departments) as Department[]).map(key => { const item = departments[key]; const Icon = item.icon; const wing = locations[wingByDepartment[key]]; return <button key={key} className={state.location === wing.id ? 'active' : ''} onClick={() => { setRemoteLocation(wing.id); setState(prev => ({ ...prev, department: key, location: wing.id, screen: 'floor' })) }}><div className={`department-illustration ${key}`}><Icon /><span className="floor-lines" /></div><div><span>{wing.code}</span><h2>{wing.title}</h2><p>{wing.subtitle}</p><small>{wing.children?.length} помещения · вход из центрального перехода</small></div><ChevronRight /></button>})}</div><button className="back-button centered" onClick={() => navigate('floor')}><ArrowLeft size={17} /> ВЕРНУТЬСЯ В ТЕКУЩУЮ ЛОКАЦИЮ</button></div>
 }
 
-function NewsTerminal({ navigate, openProductionJobs }: { navigate: (s: Screen) => void, openProductionJobs: () => void }) {
-  const chronologicalNews = [...news].sort((a, b) => a.time.localeCompare(b.time))
-  return <div className="content-screen terminal-page"><button className="back-button" onClick={() => navigate('floor')}><ArrowLeft size={17} /> В ТЕКУЩУЮ ЛОКАЦИЮ</button><div className="screen-heading compact"><div><span className="eyebrow"><span /> ИНФО-ТЕРМИНАЛ · ЯРУС 47</span><h1>Новости яруса</h1><p>Запросы отсеков и подтверждённые изменения операции — от ранних к поздним.</p></div><div className="terminal-live"><i /> СЕТЬ АКТИВНА</div></div><div className="news-list">{chronologicalNews.map(item => <article className={item.critical ? 'critical' : ''} key={item.time}><time>{item.time}</time><div className="news-line"><span>{item.category}</span><i /></div><div><h3>{item.title}</h3><p>{item.body}</p>{item.critical && <button onClick={openProductionJobs}>ПОКАЗАТЬ МАРШРУТ ОТ ЦЕНТРА <ChevronRight size={15} /></button>}</div></article>)}</div><div className="terminal-footer"><Radio size={17} /> ПОКАЗАНЫ СООБЩЕНИЯ ТЕКУЩЕГО ЭПИЗОДА</div></div>
+const storyIllustrations: Record<string, { src: string, alt: string }> = {
+  'lift-silent': { src: 'story/lift-silent.svg', alt: 'Остановившийся грузовой лифт между тёмными ярусами' },
+  'drive-diagnostics': { src: 'story/drive-diagnostics.svg', alt: 'Диагностический свет над разобранным приводом лифта' },
+  'power-lock': { src: 'story/power-lock.svg', alt: 'Силовой щит с активной ручной блокировкой' },
+  'shaft-mark': { src: 'story/shaft-mark.svg', alt: 'Свежий след удара на направляющей шахты' },
+  'diagnostic-synthesis': { src: 'story/diagnostic-synthesis.svg', alt: 'Два технических доклада, сведённые на одном столе' },
+  'factory-council': { src: 'story/factory-council.svg', alt: 'Панель Заводского вече с тремя равными вариантами' },
+  'lower-signal': { src: 'story/lower-signal.svg', alt: 'Сигнальный маяк в закрытом нижнем пролёте' },
+  'ending-safe': { src: 'story/ending-safe.svg', alt: 'Кабина осторожно поднимается при включённых защитах' },
+  'ending-risk': { src: 'story/ending-risk.svg', alt: 'Кабина удержана аварийными ловителями' },
+  'ending-conserve': { src: 'story/ending-conserve.svg', alt: 'Грузы идут по сервисной линии мимо закрытой шахты' },
 }
 
-function Chronicle({ state, job, progress, episodeWorkUnits, operationProgress, navigate }: { state: SavedState, job: Job | null, progress: number, episodeWorkUnits: number, operationProgress: number, navigate: (s: Screen) => void }) {
-  const [tab, setTab] = useState<'episode' | 'personal' | 'participants'>('episode')
-  const chronicleTime = (workUnits: number) => new Date((state.episodeStartedAt ?? Date.now()) + workUnits * 60_000).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
-  const storyEvents = [
-    { threshold: 0, title: 'Операция началась', text: 'Начата первая задача. Ярус 47 приступил к восстановлению лифта.', icon: Target },
-    { threshold: MISSION_WORK_UNITS, title: 'Причина остановки найдена', text: episodeMissions[0].story, icon: Wrench },
-    { threshold: MISSION_WORK_UNITS * 2, title: 'Восстановление подготовлено', text: episodeMissions[1].story, icon: Cog },
-    { threshold: EPISODE_WORK_UNITS, title: 'Грузовой лифт запущен', text: episodeMissions[2].story, icon: Zap },
-  ].filter(event => job && episodeWorkUnits >= event.threshold)
-  const participants = [
-    { name: state.name, department: job ? departments[job.department].label : 'Без назначения', contribution: progress, self: true },
-    { name: 'Марина К.', department: 'Инженерия', contribution: 6 },
-    { name: 'Сергей П.', department: 'Энергетика', contribution: 4 },
-    { name: 'Алексей В.', department: 'Производство', contribution: 3 },
-  ]
+function NewsTerminal({ episode, chronicle, navigate, openProductionJobs }: { episode: EpisodeSnapshot, chronicle: StoryChronicleEntry[], navigate: (s: Screen) => void, openProductionJobs: () => void }) {
+  const reports = [...chronicle].reverse().slice(0, 8)
+  return <div className="content-screen terminal-page"><button className="back-button" onClick={() => navigate('floor')}><ArrowLeft size={17} /> В ТЕКУЩУЮ ЛОКАЦИЮ</button><div className="screen-heading compact"><div><span className="eyebrow"><span /> ОПЕРАТИВНЫЙ ПОТОК · ЯРУС 47</span><h1>Доклады завода</h1><p>Сообщения создаются из фактических завершений работ и решений, от новых к ранним.</p></div><div className="terminal-live"><i /> {episode.mode === 'shared' ? 'ОБЩАЯ СЕТЬ' : 'ЛОКАЛЬНОЕ ДЕМО'}</div></div><div className="news-list">{reports.map(entry => <article className={entry.significance === 'turning_point' || entry.significance === 'finale' ? 'critical' : ''} key={entry.id}><time>{new Date(entry.publishedAt).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}</time><div className="news-line"><span>{entry.type}</span><i /></div><div><h3>{entry.title}</h3><p>{entry.lead}</p><button onClick={() => navigate('chronicle')}>ОТКРЫТЬ ПОЛНЫЙ ТЕКСТ <ChevronRight size={15} /></button></div></article>)}</div>{episode.status !== 'complete' && <button className="terminal-route-button" onClick={openProductionJobs}><Target size={16} /> ВЕРНУТЬСЯ К МАРШРУТАМ РАБОТ</button>}<div className="terminal-footer"><Radio size={17} /> РЯДОВЫЕ ДЕЙСТВИЯ ОСТАЮТСЯ В ЛИЧНОМ ДНЕВНИКЕ</div></div>
+}
 
+function Chronicle({ state, job, progress, episode, chronicle, player, navigate }: { state: SavedState, job: Job | null, progress: number, episode: EpisodeSnapshot, chronicle: StoryChronicleEntry[], player: PlayerView, navigate: (s: Screen) => void }) {
+  const [tab, setTab] = useState<'episode' | 'personal' | 'facts'>('episode')
+  const [filter, setFilter] = useState<'all' | 'major'>('all')
+  const visible = chronicle.filter(entry => filter === 'all' || ['chapter', 'turning_point', 'finale'].includes(entry.significance))
+  const contributionTotal = player.contributions.reduce((sum, item) => sum + item.amount, 0)
   return <div className="content-screen chronicle-screen">
     <button className="back-button" onClick={() => navigate('floor')}><ArrowLeft size={17} /> НАЗАД</button>
-    <div className="chronicle-hero"><span className="eyebrow"><span /> ЛЕТОПИСЬ · ЭПИЗОД 01</span><h1>Немой лифт</h1><p>{episodeWorkUnits >= EPISODE_WORK_UNITS ? 'Грузовой лифт снова работает. Снабжение верхних секторов восстановлено, Эпизод 01 завершён.' : 'Летопись пополняется после каждой большой миссии и фиксирует изменения сюжета.'}</p><div className="chronicle-status"><i /> {episodeWorkUnits >= EPISODE_WORK_UNITS ? 'ЭПИЗОД ЗАВЕРШЁН' : `ОПЕРАЦИЯ В ПРОЦЕССЕ · ${operationProgress}%`}</div></div>
-    <div className="chronicle-tabs" role="tablist" aria-label="Разделы летописи">
-      <button className={tab === 'episode' ? 'active' : ''} onClick={() => setTab('episode')} role="tab" aria-selected={tab === 'episode'}>ЭПИЗОД</button>
-      <button className={tab === 'personal' ? 'active' : ''} onClick={() => setTab('personal')} role="tab" aria-selected={tab === 'personal'}>ЛИЧНАЯ ИСТОРИЯ</button>
-      <button className={tab === 'participants' ? 'active' : ''} onClick={() => setTab('participants')} role="tab" aria-selected={tab === 'participants'}>УЧАСТНИКИ <span>{participants.length}</span></button>
-    </div>
-    {tab === 'episode' && <div className="chronicle-layout"><section><div className="section-kicker">СЮЖЕТНЫЕ СОБЫТИЯ · ОТ РАННИХ К ПОЗДНИМ</div>{storyEvents.length > 0 ? <div className="chronicle-events">{storyEvents.map(({ threshold, title, text, icon: Icon }) => <p key={threshold}><time>{chronicleTime(threshold)}</time><Icon /><span><b>{title}</b>{text}</span></p>)}</div> : <div className="chronicle-empty"><BookOpen /><p>Летопись начнётся после первой выполненной задачи.</p></div>}</section><aside className="personal-contribution"><span className="rail-label">ВАШ ВКЛАД</span><div className="contribution-avatar">{state.name.slice(0, 1).toUpperCase()}</div><h3>{state.name}</h3><p>{job ? `Выполняет задачу «${job.title}» ради этапа «${getStoryAssignment(episodeWorkUnits).workPackage.title}».` : 'История ещё не началась. Первая запись появится после начала задачи.'}</p><div><span><b>{episodeWorkUnits}</b> действий</span><span><b>{state.incidentHistory.length}</b> решений</span><span><b>{Math.min(3, Math.floor(episodeWorkUnits / MISSION_WORK_UNITS))}</b> миссий</span></div></aside></div>}
-    {tab === 'personal' && <section className="personal-story-panel"><span className="rail-label">ЛИЧНАЯ ИСТОРИЯ</span><div className="contribution-avatar">{state.name.slice(0, 1).toUpperCase()}</div><div><h2>{state.name}</h2><p>{job ? `Текущая задача: «${job.title}». Её результат нужен этапу «${getStoryAssignment(episodeWorkUnits).workPackage.title}» и миссии «${getStoryAssignment(episodeWorkUnits).mission.title}».` : 'История ещё не началась. Откройте план и начните первую задачу.'}</p><div className="personal-story-stats"><span><b>{progress}</b> выполнено</span><span><b>{state.incidentHistory.length}</b> решений</span><span><b>{job ? 'В работе' : 'Ожидает'}</b> статус</span></div></div></section>}
-    {tab === 'participants' && <section className="participants-panel"><div className="section-kicker">УЧАСТНИКИ ОПЕРАЦИИ <span>{participants.length}</span></div><div className="participants-grid">{participants.map(participant => <article key={participant.name} className={participant.self ? 'self' : ''}><div>{participant.name.slice(0, 1).toUpperCase()}</div><span><b>{participant.name} {participant.self && <em>ВЫ</em>}</b><small>{participant.department}</small></span><strong>{participant.contribution}</strong></article>)}</div></section>}
+    <div className="chronicle-hero"><span className="eyebrow"><span /> ЛЕТОПИСЬ · ЭПИЗОД 01</span><h1>Немой лифт</h1><p>{episode.goalDetail}</p><div className="chronicle-status"><i /> {episode.status === 'complete' ? 'ЭПИЗОД ЗАВЕРШЁН' : `${chronicle.length} ЗНАЧИМЫХ ПУБЛИКАЦИЙ`}</div></div>
+    <div className="chronicle-tabs" role="tablist"><button className={tab === 'episode' ? 'active' : ''} onClick={() => setTab('episode')}>ОБЩАЯ ИСТОРИЯ <span>{chronicle.length}</span></button><button className={tab === 'personal' ? 'active' : ''} onClick={() => setTab('personal')}>ЛИЧНЫЙ ВКЛАД</button><button className={tab === 'facts' ? 'active' : ''} onClick={() => setTab('facts')}>ЗНАНИЯ <span>{episode.publicFacts.length}</span></button></div>
+    {tab === 'episode' && <section className="chronicle-feed"><div className="chronicle-filter"><button className={filter === 'all' ? 'active' : ''} onClick={() => setFilter('all')}>ВСЕ ЗНАЧИМЫЕ</button><button className={filter === 'major' ? 'active' : ''} onClick={() => setFilter('major')}>ТОЛЬКО ГЛАВЫ</button></div>{visible.map(entry => { const illustration = entry.illustrationIds.map(id => storyIllustrations[id]).find(Boolean); return <article className={`chronicle-entry-card ${entry.significance}`} key={entry.id}>{illustration && <img src={illustration.src} alt={illustration.alt} />}<div className="chronicle-entry-copy"><span>ЗАПИСЬ {String(entry.sequence).padStart(2, '0')} · {entry.type.toUpperCase()}</span><h2>{entry.title}</h2><p className="entry-lead">{entry.lead}</p><details><summary>ЧИТАТЬ ПОЛНОСТЬЮ</summary><p>{entry.body}</p>{entry.contributors.length > 0 && <div className="entry-contributors"><Users size={15} /> Вклад: {entry.contributors.map(person => person.name).join(', ')}</div>}<small>Опубликовано {new Date(entry.publishedAt).toLocaleString('ru-RU')}</small></details></div></article>})}</section>}
+    {tab === 'personal' && <section className="personal-story-panel"><span className="contribution-avatar">{player.displayName.slice(0, 1).toUpperCase()}</span><div><span className="rail-label">ЛИЧНАЯ ИСТОРИЯ</span><h2>{player.displayName}</h2><p>{job ? `Сейчас выполняет работу «${job.title}» в локации «${locations[state.location].title}».` : 'Сейчас нет активной работы.'}</p><div className="personal-story-stats"><span><b>{contributionTotal}</b> действий</span><span><b>{player.contributions.length}</b> работ</span><span><b>{state.incidentHistory.length}</b> решений</span><span><b>{progress}</b> текущий результат</span></div>{player.contributions.length > 0 && <div className="personal-work-list">{player.contributions.map(item => <p key={item.workId}><b>{item.workId}</b><span>{item.amount} вклада · {item.xp} XP</span></p>)}</div>}</div></section>}
+    {tab === 'facts' && <section className="fact-grid chronicle-facts">{episode.publicFacts.map(fact => <article className={fact.certainty} key={fact.id}><span>{fact.certainty === 'confirmed' ? 'ПОДТВЕРЖДЕНО' : fact.certainty === 'refuted' ? 'ОПРОВЕРГНУТО' : 'ГИПОТЕЗА'}</span><h3>{fact.title}</h3><p>{fact.text}</p><small>Источник: {fact.sourceWorkId}</small></article>)}</section>}
   </div>
+}
+
+function StoryModeBanner({ mode, error }: { mode: EpisodeSnapshot['mode'], error: string | null }) {
+  if (mode === 'shared' && !error) return null
+  return <div className={`story-mode-banner ${mode}`}><Info size={14} /><span><b>{mode === 'local-demo' ? 'ЛОКАЛЬНАЯ ДЕМОНСТРАЦИЯ' : 'НЕТ СВЯЗИ · ТОЛЬКО ЧТЕНИЕ'}</b>{mode === 'local-demo' ? 'Прогресс существует только в этом браузере и не является общим.' : error}</span></div>
+}
+
+function MigrationNotice({ accept }: { accept: () => void }) {
+  const confirm = () => {
+    const previous = localStorage.getItem(STORAGE_KEY)
+    if (previous && !localStorage.getItem(`${STORAGE_KEY}-backup-before-story`)) localStorage.setItem(`${STORAGE_KEY}-backup-before-story`, previous)
+    accept()
+  }
+  return <div className="modal-backdrop"><section className="migration-modal"><RotateCcw size={30} /><span className="eyebrow"><span /> ОБНОВЛЕНИЕ СЮЖЕТНОЙ СИСТЕМЫ</span><h2>Прогресс теперь определяется результатами</h2><p>Старый локальный счётчик минут больше не считается общей историей. Имя, личные происшествия и открытые знания сохранены; резервная копия прежнего состояния останется на устройстве.</p><button className="primary-button" onClick={confirm}>ПРОДОЛЖИТЬ В ОБЩИЙ ЭПИЗОД <ArrowRight size={17} /></button></section></div>
+}
+
+function RecapModal({ recap, close, navigate }: { recap: RecapView, close: () => void, navigate: (screen: Screen) => void }) {
+  const proceed = (screen?: Screen) => { close(); if (screen) navigate(screen) }
+  return <div className="modal-backdrop"><section className="recap-modal"><div className="recap-header"><span><BookOpen size={18} /> ВОЗВРАЩЕНИЕ В ЭПИЗОД</span><button onClick={() => proceed()} aria-label="Закрыть пересказ">×</button></div><div className="recap-columns"><section><span>РАНЕЕ В ЭПИЗОДЕ</span>{recap.previous.slice(0, 3).map(entry => <article key={entry.id}><b>{entry.title}</b><p>{entry.lead}</p></article>)}</section><section className="recap-new"><span>ПОКА ВАС НЕ БЫЛО</span>{recap.whileAway.map(entry => <article key={entry.id}><b>{entry.title}</b><p>{entry.lead}</p></article>)}</section><section><span>ЧТО ТЕПЕРЬ</span><h3>{recap.now.goal}</h3><p>{recap.now.goalDetail}</p><small>{recap.now.works.length} доступных направлений{recap.now.council?.status === 'open' ? ' · открыто Заводское вече' : ''}</small></section></div><div className="recap-actions"><button onClick={() => proceed('chronicle')}>ОТКРЫТЬ ЛЕТОПИСЬ</button><button className="primary-button" onClick={() => proceed('objectives')}>К АКТУАЛЬНЫМ ДЕЙСТВИЯМ <ArrowRight size={17} /></button></div></section></div>
 }
 
 function BottomNav({ current, navigate }: { current: Screen, navigate: (s: Screen) => void }) {
@@ -1130,6 +1091,13 @@ function formatDuration(seconds: number) {
   const minutes = Math.floor(seconds / 60)
   const secs = seconds % 60
   return `${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`
+}
+
+function formatCouncilDuration(seconds: number) {
+  const hours = Math.floor(seconds / 3600)
+  const minutes = Math.floor(seconds % 3600 / 60)
+  const secs = seconds % 60
+  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`
 }
 
 function formatLongDuration(seconds: number) {
